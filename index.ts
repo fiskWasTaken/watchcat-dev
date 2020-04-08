@@ -1,5 +1,5 @@
 import {PiczelStream, PiczelClient} from "./piczel";
-import {Channel, Client, Guild, Message, MessageEmbed, TextChannel} from "discord.js";
+import {Channel, Client, Guild, Message, MessageEmbed, Permissions, TextChannel} from "discord.js";
 import {Collection, Db, MongoCallback, MongoClient, MongoError} from "mongodb";
 
 const config = require("./config.json");
@@ -55,15 +55,8 @@ async function streams(): Promise<Collection> {
     })
 }
 
-// return true if a stream is followed for a guild
-async function isFollowed(guild: Guild, stream: PiczelStream) {
-    const data = await getGuildData(guild);
-    return data.following.indexOf(stream.username) !== -1;
-}
-
 async function setChannel(guild: Guild, channelId: string) {
-    const collection = await guilds();
-    collection.updateOne(
+    return (await guilds()).updateOne(
         {guildId: guild.id},
         {$set: {channelId: channelId}},
         {upsert: true}
@@ -71,32 +64,27 @@ async function setChannel(guild: Guild, channelId: string) {
 }
 
 async function follow(guild: Guild, username: string) {
-    const collection = await guilds();
-    return collection.updateOne(
+    return (await guilds()).updateOne(
         {guildId: guild.id},
-        {$addToSet: {following: username}},
+        {$addToSet: {following: username.toLowerCase()}},
         {upsert: true}
     );
 }
 
 async function unfollow(guild: Guild, username: string) {
-    const collection = await guilds();
-    return collection.updateOne(
+    return (await guilds()).updateOne(
         {guildId: guild.id},
-        {$pull: {following: username}},
+        {$pull: {following: username.toLowerCase()}},
         {upsert: true}
     );
 }
 
 async function getGuildData(guild: Guild): Promise<GuildData> {
-    const collection = await guilds();
-    return collection.findOne({guildId: guild.id});
+    return (await guilds()).findOne({guildId: guild.id});
 }
 
-// clear guild data
 async function clearGuildData(guild: Guild) {
-    const collection = await guilds();
-    return collection.deleteOne({guildId: guild.id});
+    return (await guilds()).deleteOne({guildId: guild.id});
 }
 
 const piczel = new PiczelClient(http);
@@ -134,6 +122,8 @@ discord.on("guildDelete", (guild: Guild) => {
 interface Command {
     description: string;
     callable: (msg: Message) => void;
+    hidden?: boolean;
+    name: string;
 }
 
 async function purgeManagedMessage(msg: ManagedMessage) {
@@ -150,7 +140,7 @@ async function purgePiczelMessages(piczelUsername: string) {
     const collection = await managedMessages();
 
     collection.find({piczelUsername: piczelUsername}).forEach(msg => {
-       purgeManagedMessage(msg);
+        purgeManagedMessage(msg);
     });
 }
 
@@ -184,31 +174,39 @@ function buildEmbed(stream: PiczelStream) {
         .setFooter(`${stream.adult ? "NSFW" : "SFW"} | ${stream.follower_count} followers`);
 }
 
+async function announceForChannel(stream: PiczelStream, channel: TextChannel) {
+    const messages = await managedMessages();
+    console.log("announcing stream in channel " + channel.id);
+
+    return channel.send(buildEmbed(stream)).then(message => {
+        console.log("announcement success: " + channel.id);
+        messages.insertOne({
+            channelId: channel.id,
+            messageId: message.id,
+            guildId: channel.guild.id,
+            piczelUsername: stream.username,
+        })
+    });
+}
+
 async function announce(stream: PiczelStream) {
     const collection = await guilds();
-    const messages = await managedMessages();
 
-    collection.find({following: stream.username}).forEach(async (guild: GuildData) => {
-        const channel = await discord.channels.fetch(guild.channelId) as TextChannel;
-
-        console.log("announcing stream in channel " + channel.id);
-
-        return channel.send(buildEmbed(stream)).then(message => {
-            console.log("announcement success: " + channel.id);
-            messages.insertOne({
-                channelId: channel.id,
-                messageId: message.id,
-                guildId: channel.guild.id,
-                piczelUsername: stream.username,
-            })
-        });
+    collection.find({following: stream.username.toLowerCase()}).forEach(async (guild: GuildData) => {
+        return announceForChannel(
+            stream,
+            await discord.channels.fetch(guild.channelId) as TextChannel
+        );
     })
 }
 
 const commands: { [key: string]: Command } = {};
 
+function registerCommand(command: Command) {
+    commands[command.name] = command;
+}
 
-commands["select"] = {
+registerCommand({
     description: "Designates a channel for stream updates.",
     callable: async (msg: Message) => {
         const guildInfo = await getGuildData(msg.guild);
@@ -219,63 +217,89 @@ commands["select"] = {
 
         setChannel(msg.guild, msg.channel.id);
         msg.channel.send(`<#${msg.channel.id}> will now receive stream updates.`)
-    }
-};
+    },
+    name: "select"
+});
 
-commands["follow"] = {
-    description: "Follow a user for stream updates.",
+registerCommand({
+    description: "Follow one or more users.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const username = args[2];
+        const usernames = Array.from(new Set(args.slice(2)));
 
-        follow(msg.guild, username).then((result) => {
-            if (result.modifiedCount > 0) {
-                msg.channel.send(`Now following user ${username}.`);
-            } else {
-                msg.channel.send(`${username} is already being followed, so nothing to do.`);
+        if (usernames.length == 0) {
+            msg.channel.send("To use this command, supply a space-delimited list of users you want to follow.")
+        }
+
+        Promise.all(usernames.map((username) => follow(msg.guild, username))).then(results => {
+            const modified = results.filter(result => result.modifiedCount > 0).length;
+            const unmodified = usernames.length - modified;
+            let result = `${modified} user(s) were followed.`;
+
+            if (unmodified) {
+                result += ` ${unmodified} user(s) were already being followed.`;
             }
-        });
-    }
-};
 
-commands["unfollow"] = {
-    description: "Unfollow a user.",
+            // todo: update immediately
+            result += ` Notifications will appear the next time the user is online.`;
+
+            msg.channel.send(result);
+        });
+    },
+    name: "follow",
+});
+
+registerCommand({
+    description: "Unfollow one or more users.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const username = args[2];
-        unfollow(msg.guild, username).then((result) => {
-            if (result.modifiedCount > 0) {
-                msg.channel.send(`No longer tracking user ${username}.`);
-            } else {
-                msg.channel.send(`${username} was not being followed, so nothing to do..`);
+        const usernames = Array.from(new Set(args.slice(2)));
+
+        if (usernames.length == 0) {
+            msg.channel.send("To use this command, supply a space-delimited list of users you want to follow.")
+        }
+
+        Promise.all(usernames.map((username) => unfollow(msg.guild, username))).then(results => {
+            const modified = results.filter(result => result.modifiedCount > 0).length;
+            const unmodified = usernames.length - modified;
+            let result = `${modified} user(s) were unfollowed.`;
+
+            if (unmodified) {
+                result += ` ${unmodified} user(s) were already unfollowed.`;
             }
+
+            msg.channel.send(result);
         });
+    },
+    name: "unfollow"
+});
 
-    }
-};
-
-commands["card"] = {
+registerCommand({
     description: "Debug method to display stream title card.",
-    callable: async (msg : Message) => {
+    callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const stream = piczel.stream(args[2]);
+        const stream = piczel.cachedStream(args[2]);
 
         if (!stream) {
             msg.channel.send("Can't find this user online")
         } else {
             msg.channel.send(buildEmbed(stream));
         }
-    }
-};
+    },
+    hidden: true,
+    name: "card"
+});
 
-commands["purge"] = {
+registerCommand({
     description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones..",
     callable: async (msg: Message) => {
         purgeGuildMessages(msg.guild);
-    }
-};
+    },
+    hidden: true,
+    name: "purge"
+});
 
-commands["live"] = {
+registerCommand({
     description: "get a list of online streams.",
     callable: async (msg: Message) => {
         const list = piczel.streams.map(key => {
@@ -283,10 +307,13 @@ commands["live"] = {
         });
 
         msg.channel.send(list)
-    }
-}
+    },
+    hidden: true,
+    name: "live"
+});
 
-commands["status"] = {
+registerCommand({
+    name: "status",
     description: "Get an overview of the current server configuration.",
     callable: async (msg: Message) => {
         const guildInfo = await getGuildData(msg.guild);
@@ -310,28 +337,35 @@ I am currently posting stream updates in <#${guildInfo.channelId}> for the follo
 ${userText}
 `);
     }
-};
+});
 
-commands["stop_test"] = {
+registerCommand({
     description: "(Debug) Simulate the closure of a stream.",
-    callable: async  (msg: Message) => {
+    callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const stream = piczel.stream(args[2]);
-        piczel.streams.splice(piczel.streams.indexOf(stream),1);
+        const stream = piczel.cachedStream(args[2]);
+        piczel.streams.splice(piczel.streams.indexOf(stream), 1);
         purgePiczelMessages(stream.username);
-    }
-}
+    },
+    hidden: true,
+    name: "sim_stop"
+});
 
-commands["help"] = {
+registerCommand({
     description: "See this help page.",
     callable: async (msg: Message) => {
-        const options = Object.keys(commands).map(key => {
-            return `\`${key}\` ${commands[key].description}`;
-        })
+        const options = Object.values(commands)
+            .filter(command => !command.hidden)
+            .map(command => `\`${command.name}\` ${command.description}`);
 
         msg.channel.send("To use this bot, @mention me and type your command.\n" + options.join("\n"));
-    }
-};
+    },
+    name: "help"
+});
+
+function hasSendMessagePrivilege(channel: TextChannel) {
+    return channel.guild.member(discord.user).permissionsIn(channel).has("SEND_MESSAGES");
+}
 
 
 discord.on("message", async (msg: Message) => {
@@ -347,6 +381,16 @@ discord.on("message", async (msg: Message) => {
 
     if (!msg.guild.member(msg.author).hasPermission("ADMINISTRATOR")) {
         msg.channel.send(`Please ask your server administrator to configure this bot.`);
+        return;
+    }
+
+    if (!hasSendMessagePrivilege(msg.channel as TextChannel)) {
+        console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
+
+        msg.guild.owner.createDM().then(dm => {
+            dm.send(`Hey! I need the privilege to send messages in <#${msg.channel.id}> so I can operate.`);
+        });
+
         return;
     }
 

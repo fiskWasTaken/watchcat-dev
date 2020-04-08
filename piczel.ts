@@ -93,9 +93,9 @@ export class PiczelClient {
         });
     }
 
-    stream(username: string): PiczelStream|null {
+    cachedStream(username: string): PiczelStream|null {
         return this.streams.filter((stream: PiczelStream) => {
-            return stream.username == username;
+            return stream.username.toLowerCase() == username.toLowerCase();
         })[0];
     }
 
