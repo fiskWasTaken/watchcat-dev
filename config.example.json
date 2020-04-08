@@ -1,0 +1,6 @@
+{
+  "discord": {
+    "token": "insert bot token here",
+    "targetChannelId": "copy the channel identifier and paste it here"
+  }
+}

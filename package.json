@@ -1,0 +1,19 @@
+{
+  "name": "piczelbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/mongodb": "^3.5.5",
+    "@types/node": "^13.11.0",
+    "axios": "^0.19.2",
+    "discord.js": "^12.1.1",
+    "mongodb": "^3.5.5"
+  }
+}
