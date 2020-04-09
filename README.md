@@ -16,6 +16,6 @@ Usage is fairly straightforward: @mention the bot with a command to manage your 
 
 The bot requires no special permissions -- you just need to make sure it is able to send messages for the channel it is in.
 
-## Contributing
+## Contributing
 
 You'll want TypeScript, ts-node and MongoDB installed. And probably hit `npm install`, too.
