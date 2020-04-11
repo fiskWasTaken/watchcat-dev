@@ -1,6 +1,6 @@
-# piczelbot
+# watchcat
 
-This is the source code for my Piczel.tv integration for Discord. I keep it running on my own personal server, so you can use it right now..!
+Piczel.tv integration for Discord. I keep the latest version running, so you can use it right now..!
 
 [Click here to invite this bot to your server!!](https://discordapp.com/api/oauth2/authorize?client_id=692685101901021234&permissions=2048&scope=bot)
 
