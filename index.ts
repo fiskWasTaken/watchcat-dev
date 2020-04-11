@@ -1,108 +1,45 @@
 import {PiczelStream, PiczelClient} from "./piczel";
-import {Channel, Client, Guild, Message, MessageEmbed, Permissions, TextChannel} from "discord.js";
-import {Collection, Db, MongoCallback, MongoClient, MongoError} from "mongodb";
+import {
+    Client,
+    Guild, GuildMember,
+    Message,
+    MessageEmbed,
+    TextChannel
+} from "discord.js";
+import {MongoClient} from "mongodb";
+import {GuildData, Storage} from "./model";
 
 const config = require("./config.json");
 const discord = new Client();
 
 const http = require("axios").default.create({
-    headers: {
-        "User-Agent": "piczelD by fisk#8729"
-    }
+    headers: {"User-Agent": "Watchcat by fisk#8729"}
 });
 
-interface GuildData {
-    _id?: any;
-    following: string[];
-    channelId?: string;
-}
-
-interface ManagedMessage {
-    _id?: any;
-    messageId: string;
-    channelId: string;
-    guildId: string;
-    piczelUsername: string;
-}
-
 discord.on("ready", () => {
-    console.log(`Logged in as ${discord.user.tag}!`);
+    console.log(`Logged in as ${discord.user.tag}.`);
 });
 
 discord.login(config.discord.token);
 
 let mongo: MongoClient;
-
-async function mongoDb(): Promise<Db> {
-    return mongo.db(config.mongo.db)
-}
-
-async function guilds(): Promise<Collection<GuildData>> {
-    return mongoDb().then(db => {
-        return db.collection<GuildData>("guilds");
-    });
-}
-
-async function managedMessages(): Promise<Collection<ManagedMessage>> {
-    return mongoDb().then(db => {
-        return db.collection<ManagedMessage>("managedMessages");
-    });
-}
-
-async function streams(): Promise<Collection> {
-    return mongoDb().then(db => {
-        return db.collection("streams");
-    })
-}
-
-async function setChannel(guild: Guild, channelId: string) {
-    return (await guilds()).updateOne(
-        {guildId: guild.id},
-        {$set: {channelId: channelId}},
-        {upsert: true}
-    );
-}
-
-async function follow(guild: Guild, username: string) {
-    return (await guilds()).updateOne(
-        {guildId: guild.id},
-        {$addToSet: {following: username.toLowerCase()}},
-        {upsert: true}
-    );
-}
-
-async function unfollow(guild: Guild, username: string) {
-    return (await guilds()).updateOne(
-        {guildId: guild.id},
-        {$pull: {following: username.toLowerCase()}},
-        {upsert: true}
-    );
-}
-
-async function getGuildData(guild: Guild): Promise<GuildData> {
-    return (await guilds()).findOne({guildId: guild.id});
-}
-
-async function clearGuildData(guild: Guild) {
-    return (await guilds()).deleteOne({guildId: guild.id});
-}
+let store: Storage;
 
 const piczel = new PiczelClient(http);
 
 piczel.on("updated", async (strams: PiczelStream[]) => {
     console.log(`updating.. (${strams.length} streams available)`)
-    const collection = await streams();
-    collection.replaceOne({_id: "current"}, {streams: strams}, {upsert: true});
+    store.streams().collection.replaceOne({_id: "current"}, {streams: strams}, {upsert: true});
 });
 
 piczel.on("started", (stream: PiczelStream) => {
     console.log(`stream ${stream.id} started: ${stream.username}`);
-    announce(stream);
+    notifyAll(stream);
 });
 
 piczel.on("stopped", (stream: PiczelStream) => {
     console.log(`stream ${stream.id} stopped: ${stream.username}`);
-    purgePiczelMessages(stream.username);
+    store.messages().purgeForPiczelUser(discord, stream.username);
 });
 
 discord.on("guildCreate", (guild: Guild) => {
@@ -115,49 +52,18 @@ discord.on("guildCreate", (guild: Guild) => {
 
 discord.on("guildDelete", (guild: Guild) => {
     console.log(`Removed from guild ${guild.name} (${guild.id}) -- removing data.`);
-    clearGuildData(guild);
-    purgeGuildMessages(guild);
+    store.guilds().delete(guild);
+    store.messages().purgeForGuild(discord, guild);
 });
+
+type PRIVILEGE = "OWNER" | "ADMIN" | "USER"
 
 interface Command {
     description: string;
     callable: (msg: Message) => void;
     hidden?: boolean;
     name: string;
-}
-
-async function purgeManagedMessage(msg: ManagedMessage) {
-    const collection = await managedMessages();
-    collection.deleteOne({_id: msg._id});
-    discord.channels.fetch(msg.channelId).then(chan => {
-        (chan as TextChannel).messages.delete(msg.messageId, "bot managed");
-    });
-
-    console.log("purged managed message " + msg.messageId);
-}
-
-async function purgePiczelMessages(piczelUsername: string) {
-    const collection = await managedMessages();
-
-    collection.find({piczelUsername: piczelUsername}).forEach(msg => {
-        purgeManagedMessage(msg);
-    });
-}
-
-async function purgeChannelMessages(channel: TextChannel) {
-    const collection = await managedMessages();
-
-    collection.find({channelId: channel.id}).forEach(msg => {
-        purgeManagedMessage(msg)
-    });
-}
-
-async function purgeGuildMessages(guild: Guild) {
-    const collection = await managedMessages();
-
-    collection.find({guildId: guild.id}).forEach(msg => {
-        purgeManagedMessage(msg)
-    });
+    privilege?: PRIVILEGE;
 }
 
 function buildEmbed(stream: PiczelStream) {
@@ -171,12 +77,27 @@ function buildEmbed(stream: PiczelStream) {
         .setTimestamp(Date.parse(stream.live_since))
         .setAuthor(`${stream.username} is live!`, null, streamUrl)
         .setImage(streamPreview)
+        .setColor("PURPLE")
         .setFooter(`${stream.adult ? "NSFW" : "SFW"} | ${stream.follower_count} followers`);
 }
 
-async function announceForChannel(stream: PiczelStream, channel: TextChannel) {
-    const messages = await managedMessages();
+async function clearNotify(guild: Guild, username: string) {
+    // clear existing notify
+    const previous = await store.messages().collection.findOneAndDelete({guildId: guild.id, piczelUsername: username});
+
+    if (previous.value) {
+        console.log("cleared existing notify for user " + username);
+        discord.channels.fetch(previous.value.channelId).then(chan => {
+            (chan as TextChannel).messages.delete(previous.value.messageId);
+        })
+    }
+}
+
+async function notifyChannel(stream: PiczelStream, channel: TextChannel) {
+    clearNotify(channel.guild, stream.username);
+
     console.log("announcing stream in channel " + channel.id);
+    const messages = store.messages().collection;
 
     return channel.send(buildEmbed(stream)).then(message => {
         console.log("announcement success: " + channel.id);
@@ -184,94 +105,124 @@ async function announceForChannel(stream: PiczelStream, channel: TextChannel) {
             channelId: channel.id,
             messageId: message.id,
             guildId: channel.guild.id,
-            piczelUsername: stream.username,
+            piczelUsername: stream.username.toLowerCase(),
         })
     });
 }
 
-async function announce(stream: PiczelStream) {
-    const collection = await guilds();
-
-    collection.find({following: stream.username.toLowerCase()}).forEach(async (guild: GuildData) => {
-        return announceForChannel(
+async function notifyAll(stream: PiczelStream) {
+    store.guilds().collection.find({following: stream.username.toLowerCase()}).forEach(async (guild: GuildData) => {
+        return notifyChannel(
             stream,
             await discord.channels.fetch(guild.channelId) as TextChannel
         );
     })
 }
 
+// sync notify for stream if just watched
+function deferredNotify(guild: Guild, username: string) {
+    const stream = piczel.cachedStream(username);
+
+    if (!stream) {
+        // nothing to do
+        return;
+    }
+
+    store.guilds().get(guild).then(
+        async (data) => {
+            if (data.channelId) {
+                notifyChannel(stream, await discord.channels.fetch(data.channelId) as TextChannel)
+            }
+        }
+    )
+}
+
 const commands: { [key: string]: Command } = {};
 
 function registerCommand(command: Command) {
+    command.privilege = command.privilege || "USER";
     commands[command.name] = command;
 }
 
 registerCommand({
-    description: "Designates a channel for stream updates.",
+    description: "Designates the current channel for stream updates.",
     callable: async (msg: Message) => {
-        const guildInfo = await getGuildData(msg.guild);
+        const guildInfo = await store.guilds().get(msg.guild);
 
         if (guildInfo && guildInfo.channelId) {
-            purgeChannelMessages(await discord.channels.fetch(guildInfo.channelId) as TextChannel)
+            store.messages().purgeForChannel(discord, (await discord.channels.fetch(guildInfo.channelId) as TextChannel));
         }
 
-        setChannel(msg.guild, msg.channel.id);
-        msg.channel.send(`<#${msg.channel.id}> will now receive stream updates.`)
+        store.guilds().setChannel(msg.guild, msg.channel.id);
+
+        msg.channel.send(new MessageEmbed()
+            .setDescription(`<#${msg.channel.id}> is now set to receive notifications.`)
+            .setColor("GREEN"));
     },
-    name: "select"
+    name: "use",
+    privilege: "ADMIN"
 });
 
 registerCommand({
-    description: "Follow one or more users.",
+    description: "Add one or more user(s) to the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const usernames = Array.from(new Set(args.slice(2)));
+        const usernames = Array.from(new Set(args.slice(2).map(username => username.toLowerCase())));
 
         if (usernames.length == 0) {
-            msg.channel.send("To use this command, supply a space-delimited list of users you want to follow.")
+            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch user1 user2 user3 ..."));
+            return;
         }
 
-        Promise.all(usernames.map((username) => follow(msg.guild, username))).then(results => {
+        usernames.forEach(username => {
+            deferredNotify(msg.guild, username)
+        });
+
+        Promise.all(usernames.map((username) => store.guilds().watch(msg.guild, username))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
             const unmodified = usernames.length - modified;
-            let result = `${modified} user(s) were followed.`;
+            let result = `${modified} user(s) added to watchlist.`;
 
             if (unmodified) {
-                result += ` ${unmodified} user(s) were already being followed.`;
+                result += ` ${unmodified} user(s) were already present.`;
             }
 
-            // todo: update immediately
-            result += ` Notifications will appear the next time the user is online.`;
-
-            msg.channel.send(result);
+            msg.channel.send(new MessageEmbed().setColor("GREEN").setDescription(result));
         });
     },
-    name: "follow",
+    name: "watch",
+    privilege: "ADMIN",
 });
 
 registerCommand({
-    description: "Unfollow one or more users.",
+    description: "Remove one or more user(s) from the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const usernames = Array.from(new Set(args.slice(2)));
+        const usernames = Array.from(new Set(args.slice(2).map(username => username.toLowerCase())));
 
         if (usernames.length == 0) {
-            msg.channel.send("To use this command, supply a space-delimited list of users you want to follow.")
+            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch user1 user2 user3 ..."));
+            return;
         }
 
-        Promise.all(usernames.map((username) => unfollow(msg.guild, username))).then(results => {
+        usernames.forEach(username => {
+            clearNotify(msg.guild, username);
+        });
+
+        Promise.all(usernames.map((username) => store.guilds().unwatch(msg.guild, username))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
             const unmodified = usernames.length - modified;
-            let result = `${modified} user(s) were unfollowed.`;
+            let result = `${modified} user(s) removed from watchlist.`;
 
             if (unmodified) {
-                result += ` ${unmodified} user(s) were already unfollowed.`;
+                result += ` ${unmodified} user(s) were not present.`;
             }
 
-            msg.channel.send(result);
+            msg.channel.send(new MessageEmbed().setColor("GREEN").setDescription(result))
         });
     },
-    name: "unfollow"
+    name: "unwatch",
+    privilege: "ADMIN",
 });
 
 registerCommand({
@@ -293,49 +244,120 @@ registerCommand({
 registerCommand({
     description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones..",
     callable: async (msg: Message) => {
-        purgeGuildMessages(msg.guild);
+        store.messages().purgeForGuild(discord, msg.guild);
     },
     hidden: true,
-    name: "purge"
+    name: "purge",
+    privilege: "OWNER"
 });
 
 registerCommand({
-    description: "get a list of online streams.",
+    description: "Grant admin privileges to a given role.",
     callable: async (msg: Message) => {
-        const list = piczel.streams.map(key => {
-            return `\`${key.username}\` ${key.title}`
+        const args = msg.content.split(" ");
+        const role = msg.guild.roles.resolve(args[2]);
+
+        if (!role) {
+            msg.channel.send(new MessageEmbed().setDescription(`Could not find a role matching ID (${role}). Try copying the ID by right-clicking on the role.`).setColor("RED"));
+            return;
+        }
+
+        store.guilds().grant(msg.guild, role.id);
+        msg.channel.send(new MessageEmbed().setDescription(`Granted admin privileges for role **${role.name}**.`).setColor("GREEN"));
+    },
+    name: "grant",
+    privilege: "OWNER",
+});
+
+registerCommand({
+    description: "Revoke admin privileges from a given role.",
+    callable: async (msg: Message) => {
+        const args = msg.content.split(" ");
+        const role = args[2];
+
+        const result = await store.guilds().revoke(msg.guild, role);
+
+        // nb: don't try to naively resolve role here; we might want to remove a deleted role.
+        if (result.modifiedCount > 0) {
+            msg.channel.send(new MessageEmbed().setDescription(`Revoked admin privileges for this role.`).setColor("GREEN"));
+        } else {
+            msg.channel.send(new MessageEmbed().setDescription(`Cannot seem to find a role with this ID (${role}). Was it already removed?`).setColor("RED"));
+        }
+    },
+    name: "revoke",
+    privilege: "OWNER",
+});
+
+registerCommand({
+    description: "Display all roles with admin privileges.",
+    callable: async (msg: Message) => {
+        const guildInfo = await store.guilds().get(msg.guild);
+
+        if (!guildInfo) {
+            msg.channel.send(new MessageEmbed()
+                .setColor("RED")
+                .setTitle("Setup required")
+                .setDescription(`Select a channel to receive notifications by using the **use** command.`));
+            return;
+        }
+
+        const roles = (guildInfo.adminRoles || []).map(id => {
+            return {
+                id: id,
+                object: msg.guild.roles.resolve(id)
+            }
         });
 
-        msg.channel.send(list)
+        msg.channel.send(new MessageEmbed()
+            .setColor("BLUE")
+            .setTitle("Admins")
+            .setDescription("The following roles are able to use Watchcat admin features on this server.")
+            .addField("Roles", roles.map(role => role.object ? `**${role.object.name}** (${role.object.id})` : `(deleted role ${role.id})`).join("\n")));
     },
-    hidden: true,
+    name: "admins",
+    privilege: "OWNER",
+});
+
+registerCommand({
+    description: "Get a list of online streams.",
+    callable: async (msg: Message) => {
+        const list = piczel.streams.sort((a, b) => {
+            return a.viewers > b.viewers ? -1 : 1;
+        });
+
+        msg.channel.send(new MessageEmbed()
+            .setColor("BLUE")
+            .setTitle("Piczel.tv")
+            .addField(`Live (${list.length})`, piczel.streams.map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title}`).join("\n") || "(nobody is broadcasting at the moment.)"));
+    },
     name: "live"
 });
 
 registerCommand({
     name: "status",
-    description: "Get an overview of the current server configuration.",
+    description: "View the watchlist, and who is online.",
     callable: async (msg: Message) => {
-        const guildInfo = await getGuildData(msg.guild);
+        const guildInfo = await store.guilds().get(msg.guild);
 
         if (!guildInfo) {
-            msg.channel.send("I have not been correctly configured for this server. Start by selecting a channel for updates:\n> <@${discord.user.id}> select")
+            msg.channel.send(new MessageEmbed()
+                .setColor("RED")
+                .setTitle("Setup required")
+                .setDescription(`Select a channel to receive notifications by using the **use** command.`));
+            return;
         }
 
-        const userList = (guildInfo.following || []).map(username => `\`${username}\``).join("\n");
+        const userList = (guildInfo.following || []);
 
-        let userText;
+        const online = userList.filter(user => piczel.cachedStream(user));
+        const offline = userList.filter(user => !piczel.cachedStream(user));
 
-        if (userList.length > 0) {
-            userText = userList;
-        } else {
-            userText = `I am not currently following any users. Start by adding someone to follow:\n> <@${discord.user.id}> follow \`piczel username\``;
-        }
-
-        msg.channel.send(`
-I am currently posting stream updates in <#${guildInfo.channelId}> for the following users:
-${userText}
-`);
+        msg.channel.send(new MessageEmbed()
+            .setColor("GREEN")
+            .setTitle("Watchcat Status")
+            .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
+            .addField(`Online (${online.length})`, online.map(username => `**${username}** https://piczel.tv/watch/${username}`).join("\n") || "(empty.)")
+            .addField(`Offline (${offline.length})`, offline.map(username => `**${username}** https://piczel.tv/watch/${username}`).join("\n") || "(empty.)"));
     }
 });
 
@@ -345,28 +367,88 @@ registerCommand({
         const args = msg.content.split(" ");
         const stream = piczel.cachedStream(args[2]);
         piczel.streams.splice(piczel.streams.indexOf(stream), 1);
-        purgePiczelMessages(stream.username);
+        store.messages().purgeForPiczelUser(discord, stream.username);
     },
     hidden: true,
-    name: "sim_stop"
+    name: "sim_stop",
+    privilege: "OWNER"
+});
+
+function commandToString(command: Command) {
+    return `**${command.name}** ${command.description}`;
+}
+
+registerCommand({
+    description: "View this help page.",
+    callable: async (msg: Message) => {
+        const embed = new MessageEmbed()
+            .setTitle("Watchcat")
+            .setDescription("Piczel.tv notification service. OWNER commands require a user to have the Administrator permission.")
+            .setColor("BLUE");
+
+        // owner functions are not in this release
+        ["OWNER", "ADMIN", "USER"].forEach(priv => {
+            const opts = Object.values(commands)
+                .filter(command => !command.hidden)
+                .filter(command => command.privilege == priv)
+                .map(commandToString);
+            embed.addField(priv, opts);
+        });
+
+        msg.channel.send(embed);
+    },
+    name: "help"
 });
 
 registerCommand({
-    description: "See this help page.",
-    callable: async (msg: Message) => {
-        const options = Object.values(commands)
-            .filter(command => !command.hidden)
-            .map(command => `\`${command.name}\` ${command.description}`);
+    description: "(Deprecated) Synonym for 'watch'.",
+    callable: commands["watch"].callable,
+    name: "follow",
+    hidden: true,
+    privilege: "ADMIN",
+});
 
-        msg.channel.send("To use this bot, @mention me and type your command.\n" + options.join("\n"));
-    },
-    name: "help"
+registerCommand({
+    description: "(Deprecated) Synonym for 'unwatch'.",
+    callable: commands["unwatch"].callable,
+    name: "unfollow",
+    hidden: true,
+    privilege: "ADMIN",
+});
+
+registerCommand({
+    description: "(Deprecated) Synonym for 'use'.",
+    callable: commands["use"].callable,
+    name: "select",
+    hidden: true,
+    privilege: "ADMIN",
 });
 
 function hasSendMessagePrivilege(channel: TextChannel) {
     return channel.guild.member(discord.user).permissionsIn(channel).has("SEND_MESSAGES");
 }
 
+function userIsOwner(member: GuildMember) {
+    return member.hasPermission("ADMINISTRATOR");
+}
+
+async function userIsAdmin(member: GuildMember) {
+    const guild = await store.guilds().get(member.guild);
+
+    if (guild) {
+        for (let role of (guild.adminRoles || [])) {
+            if (member.roles.cache.has(role)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+async function userMayUseCommand(member: GuildMember, command: Command) {
+    return userIsOwner(member) || command.privilege == "USER" || await userIsAdmin(member);
+}
 
 discord.on("message", async (msg: Message) => {
     if (!msg.mentions.has(discord.user)) {
@@ -376,11 +458,6 @@ discord.on("message", async (msg: Message) => {
 
     if (msg.author.id == discord.user.id) {
         // prevent recursion
-        return;
-    }
-
-    if (!msg.guild.member(msg.author).hasPermission("ADMINISTRATOR")) {
-        msg.channel.send(`Please ask your server administrator to configure this bot.`);
         return;
     }
 
@@ -398,7 +475,14 @@ discord.on("message", async (msg: Message) => {
 
     const command = msg.content.split(" ")[1];
     if (commands.hasOwnProperty(command)) {
-        commands[command].callable(msg);
+        if (await userMayUseCommand(msg.member, commands[command])) {
+            commands[command].callable(msg);
+        } else {
+            msg.channel.send(new MessageEmbed()
+                .setColor("RED")
+                .setTitle("Insufficient privileges")
+                .setDescription("You do not have the rights to use this command."))
+        }
     } else {
         console.log("not a command " + command + ", showing help");
         commands["help"].callable(msg);
@@ -407,11 +491,9 @@ discord.on("message", async (msg: Message) => {
 
 async function setup() {
     mongo = await MongoClient.connect(config.mongo.url);
-    const db = await mongoDb();
-    db.collection("guilds").createIndex({"guildId": 1}, {unique: true})
+    store = new Storage(mongo.db(config.mongo.db));
 
-    const collection = await streams();
-    const contents = await collection.findOne({_id: "current"});
+    const contents = await store.streams().collection.findOne({_id: "current"});
     piczel.streams = (contents && contents.streams || []) as PiczelStream[];
     console.log(`Resuming from previous state, ${piczel.streams.length} streams in store.`);
     piczel.watch(config.piczel.pullInterval);
