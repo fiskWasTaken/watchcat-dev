@@ -353,7 +353,7 @@ registerCommand({
         const offline = userList.filter(user => !piczel.cachedStream(user));
 
         msg.channel.send(new MessageEmbed()
-            .setColor("GREEN")
+            .setColor("BLUE")
             .setTitle("Watchcat Status")
             .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
             .addField(`Online (${online.length})`, online.map(username => `**${username}** https://piczel.tv/watch/${username}`).join("\n") || "(empty.)")
@@ -422,6 +422,21 @@ registerCommand({
     name: "select",
     hidden: true,
     privilege: "ADMIN",
+});
+
+registerCommand({
+    description: "Information about this bot.",
+    callable: msg => {
+        const projectUrl = "https://github.com/fisuku/watchcat";
+
+        msg.channel.send(new MessageEmbed()
+            .setColor("BLUE")
+            .setTitle("Watchcat - Piczel.tv notification service")
+            .setDescription(`This bot supplies a push notification service for Discord servers. Want this bot on your server? Invite it from the project home page.`)
+            .addField("Project Home", "https://github.com/fisuku/watchcat")
+            .setURL(projectUrl));
+    },
+    name: "about",
 });
 
 function hasSendMessagePrivilege(channel: TextChannel) {
