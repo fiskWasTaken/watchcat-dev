@@ -104,7 +104,7 @@ export class ManagedMessages extends Model<ManagedMessage> {
     }
 
     async purgeForPiczelUser(discord: Client, piczelUsername: string) {
-        this.collection.find({piczelUsername: piczelUsername}).forEach(msg => {
+        this.collection.find({piczelUsername: piczelUsername.toLowerCase()}).forEach(msg => {
             this.purge(discord, msg);
         });
     }
