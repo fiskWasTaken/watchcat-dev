@@ -365,9 +365,9 @@ registerCommand({
     description: "(Debug) Simulate the closure of a stream.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
+        store.messages().purgeForPiczelUser(discord, args[2]);
         const stream = piczel.cachedStream(args[2]);
         piczel.streams.splice(piczel.streams.indexOf(stream), 1);
-        store.messages().purgeForPiczelUser(discord, stream.username);
     },
     hidden: true,
     name: "sim_stop",
