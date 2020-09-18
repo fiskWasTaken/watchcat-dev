@@ -1,6 +1,12 @@
 {
   "discord": {
-    "token": "insert bot token here",
-    "targetChannelId": "copy the channel identifier and paste it here"
+    "token": "insert bot token here"
+  },
+  "mongo": {
+    "url": "mongodb://string",
+    "db": "watchcat"
+  },
+  "piczel": {
+    "pullInterval": 30000
   }
 }

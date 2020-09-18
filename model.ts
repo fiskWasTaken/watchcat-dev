@@ -3,9 +3,13 @@ import {Client, Guild, Role, TextChannel} from "discord.js";
 
 export interface GuildData {
     _id?: any;
-    following: string[];
+    networks: {[key: string]: Network};
     channelId?: string;
     adminRoles?: string[];
+}
+
+export interface Network {
+    streams: string[];
 }
 
 export interface ManagedMessage {
@@ -13,7 +17,8 @@ export interface ManagedMessage {
     messageId: string;
     channelId: string;
     guildId: string;
-    piczelUsername: string;
+    networkId: string; // id of network, e.g. piczel.tv
+    streamId: string; // streamer ID
 }
 
 export class Storage {
@@ -71,18 +76,24 @@ export class Guilds extends Model<GuildData> {
         );
     }
 
-    watch(guild: Guild, username: string) {
+    watch(guild: Guild, networkId: string, username: string) {
+        const doc = {};
+        doc[`networks.${networkId}.streams`] = username.toLowerCase();
+
         return this.collection.updateOne(
             {guildId: guild.id},
-            {$addToSet: {following: username.toLowerCase()}},
+            {$addToSet: doc},
             {upsert: true}
         );
     }
 
-    unwatch(guild: Guild, username: string) {
+    unwatch(guild: Guild, networkId: string, username: string) {
+        const doc = {};
+        doc[`networks.${networkId}.streams`] = username.toLowerCase();
+
         return this.collection.updateOne(
             {guildId: guild.id},
-            {$pull: {following: username.toLowerCase()}},
+            {$pull: doc},
             {upsert: true}
         );
     }

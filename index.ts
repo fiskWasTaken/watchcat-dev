@@ -1,13 +1,8 @@
-import {PiczelStream, PiczelClient} from "./piczel";
-import {
-    Client,
-    Guild, GuildMember,
-    Message,
-    MessageEmbed,
-    TextChannel
-} from "discord.js";
+import {PiczelClient, PiczelStream} from "./plugins/piczel";
+import {Client, Guild, GuildMember, Message, MessageEmbed, TextChannel} from "discord.js";
 import {MongoClient} from "mongodb";
 import {GuildData, Storage} from "./model";
+import {runMigrations} from "./migrations";
 
 const config = require("./config.json");
 const discord = new Client();
@@ -105,13 +100,17 @@ async function notifyChannel(stream: PiczelStream, channel: TextChannel) {
             channelId: channel.id,
             messageId: message.id,
             guildId: channel.guild.id,
-            piczelUsername: stream.username.toLowerCase(),
+            networkId: "piczel_tv",
+            streamId: stream.username.toLowerCase(),
         })
     });
 }
 
 async function notifyAll(stream: PiczelStream) {
-    store.guilds().collection.find({following: stream.username.toLowerCase()}).forEach(async (guild: GuildData) => {
+    const doc = {};
+    doc[`networks.piczel_tv.streams`] = stream.username.toLowerCase();
+
+    store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
         return notifyChannel(
             stream,
             await discord.channels.fetch(guild.channelId) as TextChannel
@@ -178,7 +177,7 @@ registerCommand({
             deferredNotify(msg.guild, username)
         });
 
-        Promise.all(usernames.map((username) => store.guilds().watch(msg.guild, username))).then(results => {
+        Promise.all(usernames.map((username) => store.guilds().watch(msg.guild, "piczel_tv", username))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
             const unmodified = usernames.length - modified;
             let result = `${modified} user(s) added to watchlist.`;
@@ -209,7 +208,7 @@ registerCommand({
             clearNotify(msg.guild, username);
         });
 
-        Promise.all(usernames.map((username) => store.guilds().unwatch(msg.guild, username))).then(results => {
+        Promise.all(usernames.map((username) => store.guilds().unwatch(msg.guild, "piczel_tv", username))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
             const unmodified = usernames.length - modified;
             let result = `${modified} user(s) removed from watchlist.`;
@@ -226,7 +225,7 @@ registerCommand({
 });
 
 registerCommand({
-    description: "Debug method to display stream title card.",
+    description: "(Debug) Render a stream title card.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
         const stream = piczel.cachedStream(args[2]);
@@ -242,12 +241,25 @@ registerCommand({
 });
 
 registerCommand({
-    description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones..",
+    description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones.",
     callable: async (msg: Message) => {
         store.messages().purgeForGuild(discord, msg.guild);
     },
     hidden: true,
     name: "purge",
+    privilege: "OWNER"
+});
+
+registerCommand({
+    description: "(Debug) Simulate the closure of a stream.",
+    callable: async (msg: Message) => {
+        const args = msg.content.split(" ");
+        store.messages().purgeForPiczelUser(discord, args[2]);
+        const stream = piczel.cachedStream(args[2]);
+        piczel.streams.splice(piczel.streams.indexOf(stream), 1);
+    },
+    hidden: true,
+    name: "sim_stop",
     privilege: "OWNER"
 });
 
@@ -325,10 +337,16 @@ registerCommand({
             return a.viewers > b.viewers ? -1 : 1;
         });
 
-        msg.channel.send(new MessageEmbed()
+        const embed = new MessageEmbed()
             .setColor("BLUE")
             .setTitle("Piczel.tv")
-            .addField(`Live (${list.length})`, piczel.streams.map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title}`).join("\n") || "(nobody is broadcasting at the moment.)"));
+            .addField(`Live (${list.length})`, list.slice(0, 10).map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title}`).join("\n") || "(nobody is broadcasting at the moment.)");
+
+        if (list.length > 10) {
+            embed.setFooter(`and ${list.length - 10} others.`);
+        }
+
+        msg.channel.send(embed);
     },
     name: "live"
 });
@@ -347,7 +365,7 @@ registerCommand({
             return;
         }
 
-        const userList = (guildInfo.following || []);
+        const userList = (guildInfo.networks.piczel_tv.streams || []);
 
         const online = userList.filter(user => piczel.cachedStream(user));
         const offline = userList.filter(user => !piczel.cachedStream(user));
@@ -361,19 +379,6 @@ registerCommand({
     }
 });
 
-registerCommand({
-    description: "(Debug) Simulate the closure of a stream.",
-    callable: async (msg: Message) => {
-        const args = msg.content.split(" ");
-        store.messages().purgeForPiczelUser(discord, args[2]);
-        const stream = piczel.cachedStream(args[2]);
-        piczel.streams.splice(piczel.streams.indexOf(stream), 1);
-    },
-    hidden: true,
-    name: "sim_stop",
-    privilege: "OWNER"
-});
-
 function commandToString(command: Command) {
     return `**${command.name}** ${command.description}`;
 }
@@ -383,7 +388,7 @@ registerCommand({
     callable: async (msg: Message) => {
         const embed = new MessageEmbed()
             .setTitle("Watchcat")
-            .setDescription("Piczel.tv notification service. OWNER commands require a user to have the Administrator permission.")
+            .setDescription("Discord stream push notification service. OWNER commands require a user to have the Administrator permission.")
             .setColor("BLUE");
 
         // owner functions are not in this release
@@ -401,7 +406,7 @@ registerCommand({
 });
 
 registerCommand({
-    description: "(Deprecated) Synonym for 'watch'.",
+    description: "Synonym for 'watch'.",
     callable: commands["watch"].callable,
     name: "follow",
     hidden: true,
@@ -409,7 +414,7 @@ registerCommand({
 });
 
 registerCommand({
-    description: "(Deprecated) Synonym for 'unwatch'.",
+    description: "Synonym for 'unwatch'.",
     callable: commands["unwatch"].callable,
     name: "unfollow",
     hidden: true,
@@ -417,7 +422,7 @@ registerCommand({
 });
 
 registerCommand({
-    description: "(Deprecated) Synonym for 'use'.",
+    description: "Synonym for 'use'.",
     callable: commands["use"].callable,
     name: "select",
     hidden: true,
@@ -431,9 +436,9 @@ registerCommand({
 
         msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
-            .setTitle("Watchcat - Piczel.tv notification service")
-            .setDescription(`This bot supplies a push notification service for Discord servers. Want this bot on your server? Invite it from the project home page.`)
-            .addField("Project Home", "https://github.com/fisuku/watchcat")
+            .setTitle("Watchcat - Stream notification service")
+            .setDescription(`This bot supplies a push notification service for Discord. Want this bot on your server? Invite it from the project home page.`)
+            .addField("Project Home", projectUrl)
             .setURL(projectUrl));
     },
     name: "about",
@@ -507,6 +512,9 @@ discord.on("message", async (msg: Message) => {
 async function setup() {
     mongo = await MongoClient.connect(config.mongo.url);
     store = new Storage(mongo.db(config.mongo.db));
+
+    console.log("Running DB migrations...");
+    await runMigrations(store);
 
     const contents = await store.streams().collection.findOne({_id: "current"});
     piczel.streams = (contents && contents.streams || []) as PiczelStream[];
