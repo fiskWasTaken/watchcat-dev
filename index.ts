@@ -1,8 +1,12 @@
-import {PiczelClient, PiczelStream} from "./plugins/piczel";
+import {PiczelPlugin} from "./plugins/piczel";
 import {Client, Guild, GuildMember, Message, MessageEmbed, TextChannel} from "discord.js";
 import {MongoClient} from "mongodb";
 import {GuildData, Storage} from "./model";
 import {runMigrations} from "./migrations";
+import {Stream, WatchcatPlugin} from "./plugins/plugin";
+import {DummyClient} from "./plugins/dummy";
+import {PicartoClient, PicartoStream} from "./plugins/picarto";
+import {PomfPlugin} from "./plugins/pomf";
 
 const config = require("./config.json");
 const discord = new Client();
@@ -20,26 +24,11 @@ discord.login(config.discord.token);
 let mongo: MongoClient;
 let store: Storage;
 
-const piczel = new PiczelClient(http);
-
-piczel.on("updated", async (strams: PiczelStream[]) => {
-    console.log(`updating.. (${strams.length} streams available)`)
-    store.streams().collection.replaceOne({_id: "current"}, {streams: strams}, {upsert: true});
-});
-
-piczel.on("started", (stream: PiczelStream) => {
-    console.log(`stream ${stream.id} started: ${stream.username}`);
-    notifyAll(stream);
-});
-
-piczel.on("stopped", (stream: PiczelStream) => {
-    console.log(`stream ${stream.id} stopped: ${stream.username}`);
-    store.messages().purgeForPiczelUser(discord, stream.username);
-});
+const loadedPlugins: WatchcatPlugin[] = [];
 
 discord.on("guildCreate", (guild: Guild) => {
     guild.owner.user.createDM().then(chan => {
-        chan.send("Hey there - I just wanted to help you set up Piczel notifications for your server." +
+        chan.send("Hey there - I just wanted to help you set up stream notifications for your server." +
             "" +
             "To get started, you will need to define a channel in which updates will be sent. As a server administrator, @mention me from the channel you want me to target.")
     })
@@ -61,35 +50,48 @@ interface Command {
     privilege?: PRIVILEGE;
 }
 
-function buildEmbed(stream: PiczelStream) {
-    const streamUrl = `https://piczel.tv/watch/${stream.username}`;
-    const streamPreview = `https://piczel.tv/screenshots/stream_${stream.id}.jpg`;
-
-    return new MessageEmbed()
-        .setTitle(stream.title)
-        .setURL(streamUrl)
-        .setThumbnail(stream.user.avatar.url)
-        .setTimestamp(Date.parse(stream.live_since))
-        .setAuthor(`${stream.username} is live!`, null, streamUrl)
-        .setImage(streamPreview)
-        .setColor("PURPLE")
-        .setFooter(`${stream.adult ? "NSFW" : "SFW"} | ${stream.follower_count} followers`);
+interface PluginMatchResult {
+    plugin: WatchcatPlugin,
+    streamId: string
 }
 
-async function clearNotify(guild: Guild, username: string) {
+// todo: simplify? use dictionary for loaded plugins so we can key plugin by id maybe
+function pluginById(id: string): WatchcatPlugin | null {
+    for (let plugin of loadedPlugins) {
+        if (plugin.id == id) {
+            return plugin;
+        }
+    }
+
+    return null;
+}
+
+function findMatchingPlugin(url: string): PluginMatchResult | null {
+    for (let plugin of loadedPlugins) {
+        const streamId = plugin.match(url)
+
+        if (streamId) {
+            return {plugin, streamId}
+        }
+    }
+
+    return null;
+}
+
+async function clearNotify(guild: Guild, networkId: string, streamId: string) {
     // clear existing notify
-    const previous = await store.messages().collection.findOneAndDelete({guildId: guild.id, piczelUsername: username});
+    const previous = await store.messages().collection.findOneAndDelete({guildId: guild.id, networkId, streamId});
 
     if (previous.value) {
-        console.log("cleared existing notify for user " + username);
+        console.log("cleared existing notify for user " + streamId);
         discord.channels.fetch(previous.value.channelId).then(chan => {
             (chan as TextChannel).messages.delete(previous.value.messageId);
         })
     }
 }
 
-async function notifyChannel(stream: PiczelStream, channel: TextChannel) {
-    clearNotify(channel.guild, stream.username);
+async function notifyChannel(plugin: WatchcatPlugin, stream: Stream, channel: TextChannel) {
+    clearNotify(channel.guild, plugin.id, stream.username);
 
     console.log("announcing stream in channel " + channel.id);
     const messages = store.messages().collection;
@@ -100,18 +102,19 @@ async function notifyChannel(stream: PiczelStream, channel: TextChannel) {
             channelId: channel.id,
             messageId: message.id,
             guildId: channel.guild.id,
-            networkId: "piczel_tv",
+            networkId: plugin.id,
             streamId: stream.username.toLowerCase(),
         })
     });
 }
 
-async function notifyAll(stream: PiczelStream) {
+async function notifyAll(plugin: WatchcatPlugin, stream: Stream) {
     const doc = {};
-    doc[`networks.piczel_tv.streams`] = stream.username.toLowerCase();
+    doc[`networks.${plugin.id}.streams`] = stream.username.toLowerCase();
 
     store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
         return notifyChannel(
+            plugin,
             stream,
             await discord.channels.fetch(guild.channelId) as TextChannel
         );
@@ -119,8 +122,8 @@ async function notifyAll(stream: PiczelStream) {
 }
 
 // sync notify for stream if just watched
-function deferredNotify(guild: Guild, username: string) {
-    const stream = piczel.cachedStream(username);
+function deferredNotify(guild: Guild, plugin: WatchcatPlugin, username: string) {
+    const stream = plugin.cachedStream(username);
 
     if (!stream) {
         // nothing to do
@@ -130,7 +133,7 @@ function deferredNotify(guild: Guild, username: string) {
     store.guilds().get(guild).then(
         async (data) => {
             if (data.channelId) {
-                notifyChannel(stream, await discord.channels.fetch(data.channelId) as TextChannel)
+                notifyChannel(plugin, stream, await discord.channels.fetch(data.channelId) as TextChannel)
             }
         }
     )
@@ -166,20 +169,21 @@ registerCommand({
     description: "Add one or more user(s) to the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const usernames = Array.from(new Set(args.slice(2).map(username => username.toLowerCase())));
 
-        if (usernames.length == 0) {
-            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch user1 user2 user3 ..."));
+        const results = Array.from(new Set(args.slice(2).map(username => username.toLowerCase()))).map(findMatchingPlugin).filter(result => result)
+
+        if (results.length == 0) {
+            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch piczel.tv/watch/user1 picarto.tv/user2 ..."));
             return;
         }
 
-        usernames.forEach(username => {
-            deferredNotify(msg.guild, username)
+        results.forEach(result => {
+            deferredNotify(msg.guild, result.plugin, result.streamId)
         });
 
-        Promise.all(usernames.map((username) => store.guilds().watch(msg.guild, "piczel_tv", username))).then(results => {
+        Promise.all(results.map((result) => store.guilds().watch(msg.guild, result.plugin.id, result.streamId))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
-            const unmodified = usernames.length - modified;
+            const unmodified = results.length - modified;
             let result = `${modified} user(s) added to watchlist.`;
 
             if (unmodified) {
@@ -197,20 +201,20 @@ registerCommand({
     description: "Remove one or more user(s) from the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const usernames = Array.from(new Set(args.slice(2).map(username => username.toLowerCase())));
+        const results = Array.from(new Set(args.slice(2).map(username => username.toLowerCase()))).map(findMatchingPlugin);
 
-        if (usernames.length == 0) {
-            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch user1 user2 user3 ..."));
+        if (results.length == 0) {
+            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));
             return;
         }
 
-        usernames.forEach(username => {
-            clearNotify(msg.guild, username);
+        results.forEach(result => {
+            clearNotify(msg.guild, result.plugin.id, result.streamId);
         });
 
-        Promise.all(usernames.map((username) => store.guilds().unwatch(msg.guild, "piczel_tv", username))).then(results => {
+        Promise.all(results.map((result) => store.guilds().unwatch(msg.guild, result.plugin.id, result.streamId))).then(results => {
             const modified = results.filter(result => result.modifiedCount > 0).length;
-            const unmodified = usernames.length - modified;
+            const unmodified = results.length - modified;
             let result = `${modified} user(s) removed from watchlist.`;
 
             if (unmodified) {
@@ -225,10 +229,45 @@ registerCommand({
 });
 
 registerCommand({
+    description: "(Debug) Get a list of loaded plugins.",
+    callable: async (msg: Message) => {
+        msg.channel.send(new MessageEmbed()
+            .setColor("BLUE")
+            .setTitle("Loaded Plugins")
+            .setDescription(loadedPlugins.map(plugin => `${plugin.name} (${plugin.id})`)))
+    },
+    hidden: true,
+    name: "plugins"
+})
+
+registerCommand({
+    description: "(Debug) Test regular expression matching for a given stream URL.",
+    callable: async (msg: Message) => {
+        const args = msg.content.split(" ");
+        const result = findMatchingPlugin(args[2]);
+
+        if (result.plugin) {
+            msg.channel.send(`Found matching plugin ${result.plugin.name} - ${result.streamId}`)
+        } else {
+            msg.channel.send(`Can't find matching plugin for ${args[2]}`);
+        }
+    },
+    hidden: true,
+    name: "match"
+})
+
+registerCommand({
     description: "(Debug) Render a stream title card.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const stream = piczel.cachedStream(args[2]);
+        const result = findMatchingPlugin(args[2])
+
+        if (!result) {
+            msg.channel.send("Can't find a matching plugin")
+            return
+        }
+
+        const stream = result.plugin.cachedStream(result.streamId);
 
         if (!stream) {
             msg.channel.send("Can't find this user online")
@@ -239,6 +278,31 @@ registerCommand({
     hidden: true,
     name: "card"
 });
+
+function buildEmbed(stream: Stream) {
+    const footerFrags = [];
+
+    footerFrags.push(pluginById(stream.networkId).name)
+
+    // flag may not exist, so check for null first to avoid labeling sfw
+    if (stream.adult != null) {
+        footerFrags.push(stream.adult ? "NSFW" : "SFW")
+    }
+
+    if (stream.follower_count != null) {
+        footerFrags.push(`${stream.follower_count} followers`);
+    }
+
+    return new MessageEmbed()
+        .setTitle(stream.title || stream.username)
+        .setURL(stream.url)
+        .setThumbnail(stream.avatar)
+        .setTimestamp(Date.parse(stream.live_since))
+        .setAuthor(`${stream.username} is live!`, null, stream.url)
+        .setImage(stream.preview)
+        .setColor("PURPLE")
+        .setFooter(footerFrags.join(" | "));
+}
 
 registerCommand({
     description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones.",
@@ -254,9 +318,17 @@ registerCommand({
     description: "(Debug) Simulate the closure of a stream.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        store.messages().purgeForPiczelUser(discord, args[2]);
-        const stream = piczel.cachedStream(args[2]);
-        piczel.streams.splice(piczel.streams.indexOf(stream), 1);
+        const result = findMatchingPlugin(args[2])
+
+        if (!result) {
+            msg.channel.send("Can't find a matching plugin")
+            return
+        }
+
+        store.messages().purgeForStreamer(discord, result.plugin.id, result.streamId);
+        const stream = result.plugin.cachedStream(args[2]);
+        // todo repair this behaviour!! DO NOT PUSH UNTIL WE FIX THIS
+        //piczel.state.splice(piczel.state.indexOf(stream), 1);
     },
     hidden: true,
     name: "sim_stop",
@@ -331,16 +403,16 @@ registerCommand({
 });
 
 registerCommand({
-    description: "Get a list of online streams.",
+    description: "Get a list of online state.",
     callable: async (msg: Message) => {
-        const list = piczel.streams.sort((a, b) => {
+        const list = loadedPlugins.map(plugin => plugin.live()).reduce((acc, val) => acc.concat(val), []).sort((a, b) => {
             return a.viewers > b.viewers ? -1 : 1;
         });
 
         const embed = new MessageEmbed()
             .setColor("BLUE")
-            .setTitle("Piczel.tv")
-            .addField(`Live (${list.length})`, list.slice(0, 10).map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title}`).join("\n") || "(nobody is broadcasting at the moment.)");
+            .setTitle("All Services")
+            .addField(`Live (${list.length})`, list.slice(0, 10).map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title} ${stream.url}`).join("\n") || "(nobody is broadcasting at the moment.)");
 
         if (list.length > 10) {
             embed.setFooter(`and ${list.length - 10} others.`);
@@ -365,17 +437,26 @@ registerCommand({
             return;
         }
 
-        const userList = (guildInfo.networks.piczel_tv.streams || []);
+        for (let [networkId, data] of Object.entries(guildInfo?.networks)) {
+            const userList = (data.streams || []);
+            const plugin = pluginById(networkId);
 
-        const online = userList.filter(user => piczel.cachedStream(user));
-        const offline = userList.filter(user => !piczel.cachedStream(user));
+            if (!plugin) {
+                console.log("warn: no plugin with ID " + networkId)
+                continue;
+            }
 
-        msg.channel.send(new MessageEmbed()
-            .setColor("BLUE")
-            .setTitle("Watchcat Status")
-            .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
-            .addField(`Online (${online.length})`, online.map(username => `**${username}** https://piczel.tv/watch/${username}`).join("\n") || "(empty.)")
-            .addField(`Offline (${offline.length})`, offline.map(username => `**${username}** https://piczel.tv/watch/${username}`).join("\n") || "(empty.)"));
+            const online = userList.filter(user => plugin.cachedStream(user));
+            const offline = userList.filter(user => !plugin.cachedStream(user));
+
+            msg.channel.send(new MessageEmbed()
+                .setColor("BLUE")
+                .setTitle(`Watchcat Status - ${plugin.name}`)
+                .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
+                .addField(`Online (${online.length})`, online.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n") || "(empty.)")
+                .addField(`Offline (${offline.length})`, offline.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n") || "(empty.)"));
+        }
+
     }
 });
 
@@ -436,7 +517,7 @@ registerCommand({
 
         msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
-            .setTitle("Watchcat - Stream notification service")
+            .setTitle("Watchcat - Picarto.tv/Piczel.tv notification service")
             .setDescription(`This bot supplies a push notification service for Discord. Want this bot on your server? Invite it from the project home page.`)
             .addField("Project Home", projectUrl)
             .setURL(projectUrl));
@@ -516,10 +597,36 @@ async function setup() {
     console.log("Running DB migrations...");
     await runMigrations(store);
 
-    const contents = await store.streams().collection.findOne({_id: "current"});
-    piczel.streams = (contents && contents.streams || []) as PiczelStream[];
-    console.log(`Resuming from previous state, ${piczel.streams.length} streams in store.`);
-    piczel.watch(config.piczel.pullInterval);
+    const piczel = new PiczelPlugin(http, store);
+    piczel.pollInterval = config.piczel.pullInterval;
+
+    loadedPlugins.push(piczel)
+
+    const picarto = new PicartoClient(http, store);
+    picarto.pollInterval = 30000;
+
+    loadedPlugins.push(picarto)
+    loadedPlugins.push(new PomfPlugin(http, store))
+
+    loadedPlugins.forEach(plugin => {
+        plugin.on("updated", async (streams: Stream[]) => {
+            plugin.log(`updating.. (${streams.length} streams available)`)
+            store.state().collection.replaceOne({_id: plugin.id}, {streams: streams}, {upsert: true});
+        });
+
+        plugin.on("started", (stream: Stream) => {
+            plugin.log(`stream ${stream.id} started: ${stream.username}`);
+            notifyAll(plugin, stream);
+        });
+
+        plugin.on("stopped", (stream: Stream) => {
+            plugin.log(`stream ${stream.id} stopped: ${stream.username}`);
+            store.messages().purgeForStreamer(discord, plugin.id, stream.username);
+        });
+
+        plugin.setup()
+        plugin.log("Plugin loaded")
+    })
 }
 
 setup();

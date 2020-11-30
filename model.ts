@@ -17,7 +17,7 @@ export interface ManagedMessage {
     messageId: string;
     channelId: string;
     guildId: string;
-    networkId: string; // id of network, e.g. piczel.tv
+    networkId: string; // unique plugin/network ID
     streamId: string; // streamer ID
 }
 
@@ -34,8 +34,8 @@ export class Storage {
         return new ManagedMessages(this.db.collection<ManagedMessage>("managedMessages"));
     }
 
-    streams(): Streams {
-        return new Streams(this.db.collection<any>("streams"));
+    state(): State {
+        return new State(this.db.collection<any>("state"));
     }
 }
 
@@ -99,7 +99,7 @@ export class Guilds extends Model<GuildData> {
     }
 }
 
-export class Streams extends Model<any> {
+export class State extends Model<any> {
 
 }
 
@@ -114,8 +114,8 @@ export class ManagedMessages extends Model<ManagedMessage> {
         console.log("purged managed message " + msg.messageId);
     }
 
-    async purgeForPiczelUser(discord: Client, piczelUsername: string) {
-        this.collection.find({piczelUsername: piczelUsername.toLowerCase()}).forEach(msg => {
+    async purgeForStreamer(discord: Client, networkId: string, streamId: string) {
+        this.collection.find({networkId: networkId, streamId: streamId.toLowerCase()}).forEach(msg => {
             this.purge(discord, msg);
         });
     }

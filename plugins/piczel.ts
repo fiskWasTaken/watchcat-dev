@@ -1,5 +1,7 @@
 import {AxiosInstance} from "axios";
-import {Collection} from "mongodb";
+import {WatchcatPlugin, Stream, PluginEvents} from "./plugin";
+import {Storage} from "../model";
+import {MasterListPollingPlugin} from "./master-list-polling";
 
 interface PiczelResource {
     url: string;
@@ -53,34 +55,38 @@ export interface PiczelStream {
     user: PiczelUser;
 }
 
-interface PiczelHandlers {
-    started?: (stream: PiczelStream) => void;
-    stopped?: (stream: PiczelStream) => void;
-    updated?: (streams: PiczelStream[]) => void;
-}
-
 interface PiczelStreamsRequestParams {
     followedStreams: boolean;
     live_only: boolean;
     sfw: boolean;
 }
 
-export class PiczelClient {
-    private handlers: PiczelHandlers = {};
-    public streams: PiczelStream[] = [];
-
-    constructor(private http: AxiosInstance) {
-        this.handlers.started = (_: PiczelStream) => {};
-        this.handlers.stopped = (_: PiczelStream) => {};
-        this.handlers.updated = (_: PiczelStream[]) => {};
+export class PiczelPlugin extends MasterListPollingPlugin {
+    constructor(private http: AxiosInstance, store: Storage) {
+        super("Piczel.tv", "piczel_tv", store)
     }
 
-    watch(interval: number = 3600) {
-        this.update();
+    resolveStreamUrl(username: string): string {
+        return `https://piczel.tv/watch/${username}`
+    }
 
-        setInterval(() => {
-            this.update()
-        }, interval)
+    toStream(ps: PiczelStream): Stream {
+        return {
+            id: ps.id,
+            title: ps.title,
+            username: ps.username,
+            description: ps.description,
+            follower_count: ps.follower_count,
+            live_since: ps.live_since,
+            adult: ps.adult,
+            in_multi: ps.in_multi,
+            viewers: ps.viewers,
+            networkId: "piczel_tv",
+            source: ps,
+            url: this.resolveStreamUrl(ps.username),
+            preview: `https://piczel.tv/screenshots/stream_${ps.id}.jpg`,
+            avatar: ps.user.avatar.url
+        }
     }
 
     async fetch() {
@@ -93,49 +99,15 @@ export class PiczelClient {
         });
     }
 
-    cachedStream(username: string): PiczelStream|null {
-        return this.streams.filter((stream: PiczelStream) => {
-            return stream.username.toLowerCase() == username.toLowerCase();
-        })[0];
-    }
-
     async update() {
-        const newContents = (await this.fetch()).data;
+        const newContents = (await this.fetch()).data.map(this.toStream)
         this.handlers['updated'](newContents);
         this.compare(this.streams, newContents);
         this.streams = newContents as any;
     }
 
-    contentsArrayToObject(contents: PiczelStream[]): {[key: number]: PiczelStream} {
-        const map = {};
-
-        contents.forEach((content: PiczelStream) => {
-            map[content.id] = content;
-        });
-
-        return map;
-    }
-
-    compare(oldContents, newContents) {
-        const previous = this.contentsArrayToObject(oldContents);
-        const current = this.contentsArrayToObject(newContents);
-
-        // check added
-        for (let key in current) {
-            if (!previous[key]) {
-                this.handlers["started"](current[key])
-            }
-        }
-
-        // check removed
-        for (let key in previous) {
-            if (!current[key]) {
-                this.handlers["stopped"](previous[key])
-            }
-        }
-    }
-
-    on(event, func) {
-        this.handlers[event] = func;
+    match(url: string): string|null {
+        const res = url.match(/piczel\.tv\/watch\/(.*)$/i);
+        return res?.length > 0 ? res[1] : null;
     }
 }
