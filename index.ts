@@ -110,7 +110,7 @@ async function notifyChannel(plugin: WatchcatPlugin, stream: Stream, channel: Te
 
 async function notifyAll(plugin: WatchcatPlugin, stream: Stream) {
     const doc = {};
-    doc[`networks.${plugin.id}.streams`] = stream.username.toLowerCase();
+    doc[`networks.${plugin.id}.streams`] = stream.username;
 
     store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
         return notifyChannel(
@@ -169,8 +169,7 @@ registerCommand({
     description: "Add one or more user(s) to the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-
-        const results = Array.from(new Set(args.slice(2).map(username => username.toLowerCase()))).map(findMatchingPlugin).filter(result => result)
+        const results = Array.from(new Set(args.slice(2))).map(findMatchingPlugin).filter(result => result)
 
         if (results.length == 0) {
             msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch piczel.tv/watch/user1 picarto.tv/user2 ..."));
@@ -201,7 +200,7 @@ registerCommand({
     description: "Remove one or more user(s) from the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const results = Array.from(new Set(args.slice(2).map(username => username.toLowerCase()))).map(findMatchingPlugin);
+        const results = Array.from(new Set(args.slice(2))).map(findMatchingPlugin);
 
         if (results.length == 0) {
             msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));

@@ -78,7 +78,7 @@ export class Guilds extends Model<GuildData> {
 
     watch(guild: Guild, networkId: string, username: string) {
         const doc = {};
-        doc[`networks.${networkId}.streams`] = username.toLowerCase();
+        doc[`networks.${networkId}.streams`] = username;
 
         return this.collection.updateOne(
             {guildId: guild.id},
@@ -89,7 +89,7 @@ export class Guilds extends Model<GuildData> {
 
     unwatch(guild: Guild, networkId: string, username: string) {
         const doc = {};
-        doc[`networks.${networkId}.streams`] = username.toLowerCase();
+        doc[`networks.${networkId}.streams`] = username;
 
         return this.collection.updateOne(
             {guildId: guild.id},
@@ -115,7 +115,7 @@ export class ManagedMessages extends Model<ManagedMessage> {
     }
 
     async purgeForStreamer(discord: Client, networkId: string, streamId: string) {
-        this.collection.find({networkId: networkId, streamId: streamId.toLowerCase()}).forEach(msg => {
+        this.collection.find({networkId: networkId, streamId: streamId}).forEach(msg => {
             this.purge(discord, msg);
         });
     }
