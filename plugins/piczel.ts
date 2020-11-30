@@ -100,7 +100,7 @@ export class PiczelPlugin extends MasterListPollingPlugin {
     }
 
     async update() {
-        const newContents = (await this.fetch()).data.map(this.toStream)
+        const newContents = (await this.fetch()).data.map(stream => this.toStream(stream))
         this.handlers['updated'](newContents);
         this.compare(this.streams, newContents);
         this.streams = newContents as any;

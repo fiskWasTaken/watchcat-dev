@@ -68,7 +68,7 @@ export class PicartoClient extends MasterListPollingPlugin {
     }
 
     async update(): Promise<any> {
-        const newContents = (await this.fetch()).data.channels.map(this.toStream)
+        const newContents = (await this.fetch()).data.channels.map(stream => this.toStream(stream))
         this.handlers['updated'](newContents);
         this.compare(this.streams, newContents);
         this.streams = newContents as any;
