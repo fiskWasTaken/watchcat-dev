@@ -4,7 +4,7 @@ import {Storage} from "./model";
  * migrates piczel-oriented database model to generic vendor buckets
  */
 export async function migration0001PiczelToGeneric(store: Storage) {
-    const channelRenameResult = await store.guilds().collection.updateMany({}, {$rename: {following: "networks.piczel_tv.state"}});
+    const channelRenameResult = await store.guilds().collection.updateMany({}, {$rename: {following: "networks.piczel_tv.streams"}});
     console.log(`Migration 'following to networks.piczel_tv.streams': matched: ${channelRenameResult.matchedCount}, modified: ${channelRenameResult.modifiedCount}`);
     const messageRenameResult = await store.messages().collection.updateMany({piczelUsername: {$exists: true}}, {
         $rename: {"piczelUsername": "streamId"},
