@@ -1,7 +1,7 @@
 import {AxiosInstance} from "axios";
-import {Stream, WatchcatPlugin} from "./plugin";
-import {Storage} from "../model";
-import {MasterListPollingPlugin} from "./master-list-polling";
+import {Stream} from "./plugin";
+import {PollingPlugin} from "./polling";
+import {Db, MongoClient} from "mongodb";
 
 interface PicartoLanguage {
     language_id: number,
@@ -27,9 +27,9 @@ export interface PicartoStream {
     new_account: boolean
 }
 
-export class PicartoClient extends MasterListPollingPlugin {
-    constructor(private http: AxiosInstance, store: Storage) {
-        super("Picarto.tv", "picarto_tv", store)
+export class PicartoPlugin extends PollingPlugin {
+    constructor() {
+        super("Picarto.tv", "picarto_tv")
     }
 
     resolveStreamUrl(username: string): string {
@@ -47,7 +47,7 @@ export class PicartoClient extends MasterListPollingPlugin {
             adult: stream.adult,
             in_multi: stream.is_multistream,
             viewers: stream.channel_viewers,
-            networkId: "picarto_tv",
+            networkId: this.id,
             source: stream,
             url: this.resolveStreamUrl(stream.channel_name),
             preview: stream.thumbnail
@@ -67,10 +67,10 @@ export class PicartoClient extends MasterListPollingPlugin {
         return res?.length > 0 ? res[1] : null;
     }
 
-    async update(): Promise<any> {
+    async poll(): Promise<any> {
         const newContents = (await this.fetch()).data.channels.map(stream => this.toStream(stream))
-        this.handlers['updated'](newContents);
-        this.compare(this.streams, newContents);
-        this.streams = newContents as any;
+        this.handlers.updated(newContents);
+        this.compare(this.cache, newContents);
+        this.cache = newContents as any;
     }
 }

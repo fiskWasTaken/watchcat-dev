@@ -1,9 +1,9 @@
 import {Collection, Db, DeleteWriteOpResultObject} from "mongodb";
-import {Client, Guild, Role, TextChannel} from "discord.js";
+import {Client, Guild, TextChannel} from "discord.js";
 
 export interface GuildData {
     _id?: any;
-    networks: {[key: string]: Network};
+    networks: { [key: string]: Network };
     channelId?: string;
     adminRoles?: string[];
 }
@@ -23,7 +23,8 @@ export interface ManagedMessage {
 
 export class Storage {
     constructor(private db: Db) {
-        db.collection("guilds").createIndex({"guildId": 1}, {unique: true})
+        db.collection("guilds").createIndex({"guildId": 1}, {unique: true}).then(_ => {
+        })
     }
 
     guilds(): Guilds {
@@ -33,14 +34,11 @@ export class Storage {
     messages(): ManagedMessages {
         return new ManagedMessages(this.db.collection<ManagedMessage>("managedMessages"));
     }
-
-    state(): State {
-        return new State(this.db.collection<any>("state"));
-    }
 }
 
 export class Model<T> {
-    constructor(public collection: Collection<T>) {}
+    constructor(public collection: Collection<T>) {
+    }
 }
 
 export class Guilds extends Model<GuildData> {
@@ -99,13 +97,9 @@ export class Guilds extends Model<GuildData> {
     }
 }
 
-export class State extends Model<any> {
-
-}
-
 export class ManagedMessages extends Model<ManagedMessage> {
     async purge(discord: Client, msg: ManagedMessage) {
-        this.collection.deleteOne({_id: msg._id});
+        await this.collection.deleteOne({_id: msg._id});
 
         discord.channels.fetch(msg.channelId).then(chan => {
             (chan as TextChannel).messages.delete(msg.messageId, "bot managed");
@@ -115,19 +109,19 @@ export class ManagedMessages extends Model<ManagedMessage> {
     }
 
     async purgeForStreamer(discord: Client, networkId: string, streamId: string) {
-        this.collection.find({networkId: networkId, streamId: streamId}).forEach(msg => {
+        await this.collection.find({networkId: networkId, streamId: streamId}).forEach(msg => {
             this.purge(discord, msg);
         });
     }
 
     async purgeForChannel(discord: Client, channel: TextChannel) {
-        this.collection.find({channelId: channel.id}).forEach(msg => {
+        await this.collection.find({channelId: channel.id}).forEach(msg => {
             this.purge(discord, msg)
         });
     }
 
     async purgeForGuild(discord: Client, guild: Guild) {
-        this.collection.find({guildId: guild.id}).forEach(msg => {
+        await this.collection.find({guildId: guild.id}).forEach(msg => {
             this.purge(discord, msg)
         });
     }

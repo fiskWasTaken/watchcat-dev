@@ -1,6 +1,5 @@
-import {Stream, WatchcatPlugin, PluginEvents} from "./plugin";
-import {AxiosInstance} from "axios";
-import {GuildData, Storage} from "../model";
+import {Plugin, Stream} from "./plugin";
+import {PollingPlugin} from "./polling";
 
 /**
  * important URLs
@@ -14,18 +13,9 @@ import {GuildData, Storage} from "../model";
  * - strategy: collaborate all pomf users in database, and fire off
  */
 
-export class PomfPlugin extends WatchcatPlugin {
-    public streams: Stream[] = [];
-    public pollInterval = 30000;
-
-    cachedStream(username: string): Stream|null {
-        return this.streams.filter((stream: Stream) => {
-            return stream.username.toLowerCase() == username.toLowerCase();
-        })[0];
-    }
-
-    live(): Stream[] {
-        return this.streams;
+export class PomfPlugin extends PollingPlugin {
+    constructor() {
+        super("Pomf.TV", "pomf_tv")
     }
 
     match(url: string): string | null {
@@ -33,25 +23,10 @@ export class PomfPlugin extends WatchcatPlugin {
         return res?.length > 0 ? res[1] : null;
     }
 
-    async setup() {
-        const contents = await this.store.state().collection.findOne({_id: this.id});
-        this.streams = (contents && contents.streams || []) as Stream[];
-        this.log(`Resuming from previous state, ${this.streams.length} streams in store.`);
-        this.watch(this.pollInterval);
-    }
-
-    watch(interval: number = 3600) {
-        this.update();
-
-        setInterval(() => {
-            this.update()
-        }, interval)
-    }
-
     async checkOnlineStatus(username: string) {
         return this.http.get("https://pomf.tv/include/checklive.php", {
             params: {
-                stream: username
+                stream: username,
             },
         });
     }
@@ -60,47 +35,39 @@ export class PomfPlugin extends WatchcatPlugin {
         return `https://pomf.tv/stream/${username}`
     }
 
-    async update(): Promise<any> {
+    async poll(): Promise<any> {
         // step one: concatenate our target users to make requests for
-        // todo: use mongo aggregate (nobody really uses this bot atm so w/e)
-        const doc = {"networks.pomf_tv.streams": {$exists: true}};
-        const collect = new Set<string>()
-
-        await this.store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
-            for (const stream of guild.networks.pomf_tv.streams) {
-                collect.add(stream)
-            }
-        })
-
-        this.log(`${collect.size} user(s) for which to perform update.`)
+        const collect = await this.globalFollows();
+        this.log(`${collect.length} user(s) for which to perform update.`)
 
         // step two: test online status of each
-        for (const user of Array.from(collect)) {
+        for (const user of collect) {
             const status = (await this.checkOnlineStatus(user)).data
             const known = this.cachedStream(user)
 
-            if (status==="") {
+            if (status === "") {
                 // user does not exist -- do something maybe?
                 this.log(`Trying to track ${user}, but they don't seem to exist.`)
-            } else if (status=="0") {
+            } else if (status == "0") {
                 if (known) {
                     this.log(`${user} is now offline.`)
-                    this.handlers["stopped"](known)
-                    this.streams.splice(this.streams.indexOf(known), 1)
+                    this.handlers.stopped(known)
+                    this.cache.splice(this.cache.indexOf(known), 1)
                 }
-            } else if (status=="1") {
+            } else if (status == "1") {
                 if (!known) {
                     this.log(`${user} is now online.`)
                     const doc = {
                         id: 1337,
                         username: user,
                         url: this.resolveStreamUrl(user),
-                        networkId: "pomf_tv",
-                        source: {}
+                        networkId: this.id,
+                        source: {},
+                        avatar: `https://pomf.tv/img/stream/${user}.png`
                     }
 
-                    this.streams.push(doc)
-                    this.handlers["started"](doc)
+                    this.cache.push(doc)
+                    this.handlers.started(doc)
                 }
             } else {
                 // no fucking idea what this is
@@ -108,11 +75,7 @@ export class PomfPlugin extends WatchcatPlugin {
             }
         }
 
-        this.handlers["updated"](this.streams)
-    }
-
-    constructor(private http: AxiosInstance, private store: Storage) {
-        super("Pomf.TV", "pomf_tv")
+        this.handlers.updated(this.cache)
     }
 
     /**
@@ -123,6 +86,6 @@ export class PomfPlugin extends WatchcatPlugin {
      */
     async checkUsernameValidity(username: string): Promise<boolean> {
         const online = await this.checkOnlineStatus(username)
-        return online.data!=""
+        return online.data !== ""
     }
 }

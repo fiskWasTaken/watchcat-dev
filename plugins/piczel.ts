@@ -1,7 +1,7 @@
 import {AxiosInstance} from "axios";
-import {WatchcatPlugin, Stream, PluginEvents} from "./plugin";
-import {Storage} from "../model";
-import {MasterListPollingPlugin} from "./master-list-polling";
+import {Stream} from "./plugin";
+import {PollingPlugin} from "./polling";
+import {Db, MongoClient} from "mongodb";
 
 interface PiczelResource {
     url: string;
@@ -43,7 +43,7 @@ export interface PiczelStream {
     slug: string;
     offline_image: PiczelResource;
     banner: PiczelBanner;
-    banner_link: string|null;
+    banner_link: string | null;
     preview: PiczelResource;
     adult: boolean;
     in_multi: boolean;
@@ -61,9 +61,9 @@ interface PiczelStreamsRequestParams {
     sfw: boolean;
 }
 
-export class PiczelPlugin extends MasterListPollingPlugin {
-    constructor(private http: AxiosInstance, store: Storage) {
-        super("Piczel.tv", "piczel_tv", store)
+export class PiczelPlugin extends PollingPlugin {
+    constructor() {
+        super("Piczel.tv", "piczel_tv")
     }
 
     resolveStreamUrl(username: string): string {
@@ -81,7 +81,7 @@ export class PiczelPlugin extends MasterListPollingPlugin {
             adult: ps.adult,
             in_multi: ps.in_multi,
             viewers: ps.viewers,
-            networkId: "piczel_tv",
+            networkId: this.id,
             source: ps,
             url: this.resolveStreamUrl(ps.username),
             preview: `https://piczel.tv/screenshots/stream_${ps.id}.jpg`,
@@ -99,14 +99,14 @@ export class PiczelPlugin extends MasterListPollingPlugin {
         });
     }
 
-    async update() {
+    async poll() {
         const newContents = (await this.fetch()).data.map(stream => this.toStream(stream))
-        this.handlers['updated'](newContents);
-        this.compare(this.streams, newContents);
-        this.streams = newContents as any;
+        this.handlers.updated(newContents);
+        this.compare(this.cache, newContents);
+        this.cache = newContents as any;
     }
 
-    match(url: string): string|null {
+    match(url: string): string | null {
         const res = url.match(/piczel\.tv\/watch\/(.*)$/i);
         return res?.length > 0 ? res[1] : null;
     }

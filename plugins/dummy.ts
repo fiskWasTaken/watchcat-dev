@@ -1,9 +1,9 @@
-import {WatchcatPlugin, Stream} from "./plugin";
+import {Plugin, Stream} from "./plugin";
 
 /**
  * example client
  */
-export class DummyClient extends WatchcatPlugin {
+export class DummyClient extends Plugin {
     public dummy: Stream = {
         id: 1,
         networkId: "dummy_client",

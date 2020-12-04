@@ -1,30 +1,32 @@
 import {PiczelPlugin} from "./plugins/piczel";
 import {Client, Guild, GuildMember, Message, MessageEmbed, TextChannel} from "discord.js";
-import {MongoClient} from "mongodb";
-import {GuildData, Storage} from "./model";
+import {Db, MongoClient} from "mongodb";
+import {Storage} from "./model";
 import {runMigrations} from "./migrations";
-import {Stream, WatchcatPlugin} from "./plugins/plugin";
-import {DummyClient} from "./plugins/dummy";
-import {PicartoClient, PicartoStream} from "./plugins/picarto";
+import {Plugin, Stream} from "./plugins/plugin";
+import {PicartoPlugin} from "./plugins/picarto";
 import {PomfPlugin} from "./plugins/pomf";
+import {TwitchPlugin} from "./plugins/twitch";
+import {Command} from "./commands";
+import {buildEmbed, Dispatcher} from "./dispatcher";
+
+const express = require('express')
 
 const config = require("./config.json");
-const discord = new Client();
+const app = express()
 
 const http = require("axios").default.create({
     headers: {"User-Agent": "Watchcat by fisk#8729"}
 });
 
-discord.on("ready", () => {
-    console.log(`Logged in as ${discord.user.tag}.`);
-});
-
-discord.login(config.discord.token);
-
 let mongo: MongoClient;
 let store: Storage;
 
-const loadedPlugins: WatchcatPlugin[] = [];
+const discord = new Client();
+
+discord.on("ready", () => {
+    console.log(`Logged in as ${discord.user.tag}.`);
+});
 
 discord.on("guildCreate", (guild: Guild) => {
     guild.owner.user.createDM().then(chan => {
@@ -40,104 +42,105 @@ discord.on("guildDelete", (guild: Guild) => {
     store.messages().purgeForGuild(discord, guild);
 });
 
-type PRIVILEGE = "OWNER" | "ADMIN" | "USER"
-
-interface Command {
-    description: string;
-    callable: (msg: Message) => void;
-    hidden?: boolean;
-    name: string;
-    privilege?: PRIVILEGE;
-}
-
-interface PluginMatchResult {
-    plugin: WatchcatPlugin,
-    streamId: string
-}
-
-// todo: simplify? use dictionary for loaded plugins so we can key plugin by id maybe
-function pluginById(id: string): WatchcatPlugin | null {
-    for (let plugin of loadedPlugins) {
-        if (plugin.id == id) {
-            return plugin;
-        }
-    }
-
-    return null;
-}
-
-function findMatchingPlugin(url: string): PluginMatchResult | null {
-    for (let plugin of loadedPlugins) {
-        const streamId = plugin.match(url)
-
-        if (streamId) {
-            return {plugin, streamId}
-        }
-    }
-
-    return null;
-}
-
-async function clearNotify(guild: Guild, networkId: string, streamId: string) {
-    // clear existing notify
-    const previous = await store.messages().collection.findOneAndDelete({guildId: guild.id, networkId, streamId});
-
-    if (previous.value) {
-        console.log("cleared existing notify for user " + streamId);
-        discord.channels.fetch(previous.value.channelId).then(chan => {
-            (chan as TextChannel).messages.delete(previous.value.messageId);
-        })
-    }
-}
-
-async function notifyChannel(plugin: WatchcatPlugin, stream: Stream, channel: TextChannel) {
-    clearNotify(channel.guild, plugin.id, stream.username);
-
-    console.log("announcing stream in channel " + channel.id);
-    const messages = store.messages().collection;
-
-    return channel.send(buildEmbed(stream)).then(message => {
-        console.log("announcement success: " + channel.id);
-        messages.insertOne({
-            channelId: channel.id,
-            messageId: message.id,
-            guildId: channel.guild.id,
-            networkId: plugin.id,
-            streamId: stream.username.toLowerCase(),
-        })
-    });
-}
-
-async function notifyAll(plugin: WatchcatPlugin, stream: Stream) {
-    const doc = {};
-    doc[`networks.${plugin.id}.streams`] = stream.username;
-
-    store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
-        return notifyChannel(
-            plugin,
-            stream,
-            await discord.channels.fetch(guild.channelId) as TextChannel
-        );
-    })
-}
-
-// sync notify for stream if just watched
-function deferredNotify(guild: Guild, plugin: WatchcatPlugin, username: string) {
-    const stream = plugin.cachedStream(username);
-
-    if (!stream) {
-        // nothing to do
+discord.on("message", async (msg: Message) => {
+    if (!msg.mentions.has(discord.user) || msg.author.id == discord.user.id) {
+        // message isn't intended for me
         return;
     }
 
-    store.guilds().get(guild).then(
-        async (data) => {
-            if (data.channelId) {
-                notifyChannel(plugin, stream, await discord.channels.fetch(data.channelId) as TextChannel)
+    if (!hasSendMessagePrivilege(msg.channel as TextChannel)) {
+        console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
+
+        msg.guild.owner.createDM().then(dm => {
+            dm.send(`Hey! I need the privilege to send messages in <#${msg.channel.id}> so I can operate.`);
+        });
+
+        return;
+    }
+
+    console.log("received message " + msg.content);
+
+    const command = msg.content.split(" ")[1];
+    if (commands.hasOwnProperty(command)) {
+        if (await userMayUseCommand(msg.member, commands[command])) {
+            commands[command].callable(msg);
+        } else {
+            msg.channel.send(new MessageEmbed()
+                .setColor("RED")
+                .setTitle("Insufficient privileges")
+                .setDescription("You do not have the rights to use this command."))
+        }
+    } else {
+        console.log(`not a command ${command}, showing help`);
+        commands["help"].callable(msg);
+    }
+});
+
+discord.login(config.discord.token).then(async () => {
+    console.log("Discord client is ready")
+}).catch(() => {
+    console.log("Failed to sign in to Discord?")
+});
+
+interface ResolveResult {
+    plugin: Plugin,
+    streamId: string
+}
+
+class PluginManager {
+    private map: { [key: string]: Plugin } = {};
+
+    loaded(): Plugin[] {
+        return Object.values(this.map);
+    }
+
+    get(id: string): Plugin|null {
+        return this.map[id];
+    }
+
+    load(plugin: Plugin) {
+        if (config?.plugins.hasOwnProperty(plugin.id)) {
+            plugin.setConfig(config.plugins[plugin.id])
+        }
+
+        plugin.setTransport(http);
+        plugin.setBackend(db)
+        plugin.createWebhook(app);
+
+        plugin.on("updated", async (streams: Stream[]) => {
+            // nothing to do here
+        });
+
+        plugin.on("started", (stream: Stream) => {
+            plugin.log(`stream ${stream.id} started: ${stream.username}`);
+            dispatcher.announceToAll(plugin, stream);
+        });
+
+        plugin.on("stopped", (stream: Stream) => {
+            plugin.log(`stream ${stream.id} stopped: ${stream.username}`);
+            store.messages().purgeForStreamer(discord, plugin.id, stream.username);
+        });
+
+        plugin.ready()
+        plugin.log("Plugin loaded")
+
+        this.map[plugin.id] = plugin;
+    }
+
+    resolveUrl(url: string): ResolveResult | null {
+        for (let plugin of Object.values(this.map)) {
+            const streamId = plugin.match(url)
+
+            if (streamId) {
+                return {plugin, streamId}
             }
         }
-    )
+
+        return null;
+    }
 }
+
+let dispatcher: Dispatcher
 
 const commands: { [key: string]: Command } = {};
 
@@ -155,11 +158,11 @@ registerCommand({
             store.messages().purgeForChannel(discord, (await discord.channels.fetch(guildInfo.channelId) as TextChannel));
         }
 
-        store.guilds().setChannel(msg.guild, msg.channel.id);
-
-        msg.channel.send(new MessageEmbed()
-            .setDescription(`<#${msg.channel.id}> is now set to receive notifications.`)
-            .setColor("GREEN"));
+        store.guilds().setChannel(msg.guild, msg.channel.id).then(() => {
+            msg.channel.send(new MessageEmbed()
+                .setDescription(`<#${msg.channel.id}> is now set to receive notifications.`)
+                .setColor("GREEN"));
+        });
     },
     name: "use",
     privilege: "ADMIN"
@@ -169,7 +172,7 @@ registerCommand({
     description: "Add one or more user(s) to the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const results = Array.from(new Set(args.slice(2))).map(findMatchingPlugin).filter(result => result)
+        const results = Array.from(new Set(args.slice(2))).map(result => plugins.resolveUrl(result)).filter(result => result)
 
         if (results.length == 0) {
             msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch piczel.tv/watch/user1 picarto.tv/user2 ..."));
@@ -177,7 +180,7 @@ registerCommand({
         }
 
         results.forEach(result => {
-            deferredNotify(msg.guild, result.plugin, result.streamId)
+            dispatcher.announceDeferred(msg.guild, result.plugin, result.streamId)
         });
 
         Promise.all(results.map((result) => store.guilds().watch(msg.guild, result.plugin.id, result.streamId))).then(results => {
@@ -200,7 +203,7 @@ registerCommand({
     description: "Remove one or more user(s) from the watchlist.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const results = Array.from(new Set(args.slice(2))).map(findMatchingPlugin);
+        const results = Array.from(new Set(args.slice(2))).map(result => plugins.resolveUrl(result));
 
         if (results.length == 0) {
             msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));
@@ -208,7 +211,7 @@ registerCommand({
         }
 
         results.forEach(result => {
-            clearNotify(msg.guild, result.plugin.id, result.streamId);
+            dispatcher.unannounce(msg.guild, result.plugin.id, result.streamId);
         });
 
         Promise.all(results.map((result) => store.guilds().unwatch(msg.guild, result.plugin.id, result.streamId))).then(results => {
@@ -233,7 +236,7 @@ registerCommand({
         msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
             .setTitle("Loaded Plugins")
-            .setDescription(loadedPlugins.map(plugin => `${plugin.name} (${plugin.id})`)))
+            .setDescription(plugins.loaded().map(plugin => `${plugin.name} (${plugin.id})`)))
     },
     hidden: true,
     name: "plugins"
@@ -243,7 +246,7 @@ registerCommand({
     description: "(Debug) Test regular expression matching for a given stream URL.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const result = findMatchingPlugin(args[2]);
+        const result = plugins.resolveUrl(args[2]);
 
         if (result.plugin) {
             msg.channel.send(`Found matching plugin ${result.plugin.name} - ${result.streamId}`)
@@ -259,7 +262,7 @@ registerCommand({
     description: "(Debug) Render a stream title card.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const result = findMatchingPlugin(args[2])
+        const result = plugins.resolveUrl(args[2])
 
         if (!result) {
             msg.channel.send("Can't find a matching plugin")
@@ -271,42 +274,17 @@ registerCommand({
         if (!stream) {
             msg.channel.send("Can't find this user online")
         } else {
-            msg.channel.send(buildEmbed(stream));
+            msg.channel.send(buildEmbed(result.plugin, stream));
         }
     },
     hidden: true,
     name: "card"
 });
 
-function buildEmbed(stream: Stream) {
-    const footerFrags = [];
-
-    footerFrags.push(pluginById(stream.networkId).name)
-
-    // flag may not exist, so check for null first to avoid labeling sfw
-    if (stream.adult != null) {
-        footerFrags.push(stream.adult ? "NSFW" : "SFW")
-    }
-
-    if (stream.follower_count != null) {
-        footerFrags.push(`${stream.follower_count} followers`);
-    }
-
-    return new MessageEmbed()
-        .setTitle(stream.title || stream.username)
-        .setURL(stream.url)
-        .setThumbnail(stream.avatar)
-        .setTimestamp(Date.parse(stream.live_since))
-        .setAuthor(`${stream.username} is live!`, null, stream.url)
-        .setImage(stream.preview)
-        .setColor("PURPLE")
-        .setFooter(footerFrags.join(" | "));
-}
-
 registerCommand({
     description: "(Debug) Manual purge of notifications for this server, if there's any lingering ones.",
     callable: async (msg: Message) => {
-        store.messages().purgeForGuild(discord, msg.guild);
+        await store.messages().purgeForGuild(discord, msg.guild);
     },
     hidden: true,
     name: "purge",
@@ -317,14 +295,14 @@ registerCommand({
     description: "(Debug) Simulate the closure of a stream.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
-        const result = findMatchingPlugin(args[2])
+        const result = plugins.resolveUrl(args[2])
 
         if (!result) {
             msg.channel.send("Can't find a matching plugin")
             return
         }
 
-        store.messages().purgeForStreamer(discord, result.plugin.id, result.streamId);
+        await store.messages().purgeForStreamer(discord, result.plugin.id, result.streamId);
         const stream = result.plugin.cachedStream(args[2]);
         // todo repair this behaviour!! DO NOT PUSH UNTIL WE FIX THIS
         //piczel.state.splice(piczel.state.indexOf(stream), 1);
@@ -402,27 +380,6 @@ registerCommand({
 });
 
 registerCommand({
-    description: "Get a list of online state.",
-    callable: async (msg: Message) => {
-        const list = loadedPlugins.map(plugin => plugin.live()).reduce((acc, val) => acc.concat(val), []).sort((a, b) => {
-            return a.viewers > b.viewers ? -1 : 1;
-        });
-
-        const embed = new MessageEmbed()
-            .setColor("BLUE")
-            .setTitle("All Services")
-            .addField(`Live (${list.length})`, list.slice(0, 10).map(stream => `**${stream.username}** (${stream.viewers}) ${stream.title} ${stream.url}`).join("\n") || "(nobody is broadcasting at the moment.)");
-
-        if (list.length > 10) {
-            embed.setFooter(`and ${list.length - 10} others.`);
-        }
-
-        msg.channel.send(embed);
-    },
-    name: "live"
-});
-
-registerCommand({
     name: "status",
     description: "View the watchlist, and who is online.",
     callable: async (msg: Message) => {
@@ -438,7 +395,7 @@ registerCommand({
 
         for (let [networkId, data] of Object.entries(guildInfo?.networks)) {
             const userList = (data.streams || []);
-            const plugin = pluginById(networkId);
+            const plugin = plugins.get(networkId);
 
             if (!plugin) {
                 console.log("warn: no plugin with ID " + networkId)
@@ -459,10 +416,6 @@ registerCommand({
     }
 });
 
-function commandToString(command: Command) {
-    return `**${command.name}** ${command.description}`;
-}
-
 registerCommand({
     description: "View this help page.",
     callable: async (msg: Message) => {
@@ -476,37 +429,15 @@ registerCommand({
             const opts = Object.values(commands)
                 .filter(command => !command.hidden)
                 .filter(command => command.privilege == priv)
-                .map(commandToString);
+                .map((command: Command) => {
+                    return `**${command.name}** ${command.description}`;
+                });
             embed.addField(priv, opts);
         });
 
         msg.channel.send(embed);
     },
     name: "help"
-});
-
-registerCommand({
-    description: "Synonym for 'watch'.",
-    callable: commands["watch"].callable,
-    name: "follow",
-    hidden: true,
-    privilege: "ADMIN",
-});
-
-registerCommand({
-    description: "Synonym for 'unwatch'.",
-    callable: commands["unwatch"].callable,
-    name: "unfollow",
-    hidden: true,
-    privilege: "ADMIN",
-});
-
-registerCommand({
-    description: "Synonym for 'use'.",
-    callable: commands["use"].callable,
-    name: "select",
-    hidden: true,
-    privilege: "ADMIN",
 });
 
 registerCommand({
@@ -550,82 +481,32 @@ async function userMayUseCommand(member: GuildMember, command: Command) {
     return userIsOwner(member) || command.privilege == "USER" || await userIsAdmin(member);
 }
 
-discord.on("message", async (msg: Message) => {
-    if (!msg.mentions.has(discord.user)) {
-        // message isn't intended for me
-        return;
-    }
+const port = config?.express?.port || 3000
 
-    if (msg.author.id == discord.user.id) {
-        // prevent recursion
-        return;
-    }
+app.get('/', (req, res) => {
+    res.send('Watchcat is running')
+})
 
-    if (!hasSendMessagePrivilege(msg.channel as TextChannel)) {
-        console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
+app.listen(port, () => {
+    console.log(`HTTP server listening on port ${port}`)
+})
 
-        msg.guild.owner.createDM().then(dm => {
-            dm.send(`Hey! I need the privilege to send messages in <#${msg.channel.id}> so I can operate.`);
-        });
+const plugins = new PluginManager();
+let db: Db;
 
-        return;
-    }
-
-    console.log("received message " + msg.content);
-
-    const command = msg.content.split(" ")[1];
-    if (commands.hasOwnProperty(command)) {
-        if (await userMayUseCommand(msg.member, commands[command])) {
-            commands[command].callable(msg);
-        } else {
-            msg.channel.send(new MessageEmbed()
-                .setColor("RED")
-                .setTitle("Insufficient privileges")
-                .setDescription("You do not have the rights to use this command."))
-        }
-    } else {
-        console.log("not a command " + command + ", showing help");
-        commands["help"].callable(msg);
-    }
-});
-
-async function setup() {
-    mongo = await MongoClient.connect(config.mongo.url);
-    store = new Storage(mongo.db(config.mongo.db));
+MongoClient.connect(config.mongo.url).then(async mongo => {
+    db = mongo.db(config.mongo.db);
+    store = new Storage(db);
 
     console.log("Running DB migrations...");
     await runMigrations(store);
 
-    const piczel = new PiczelPlugin(http, store);
-    piczel.pollInterval = config.piczel.pullInterval;
+    [
+        new PiczelPlugin(),
+        new PicartoPlugin(),
+        new PomfPlugin(),
+        new TwitchPlugin()
+    ].forEach(plugin => plugins.load(plugin));
 
-    loadedPlugins.push(piczel)
-
-    const picarto = new PicartoClient(http, store);
-    picarto.pollInterval = 30000;
-
-    loadedPlugins.push(picarto)
-    loadedPlugins.push(new PomfPlugin(http, store))
-
-    loadedPlugins.forEach(plugin => {
-        plugin.on("updated", async (streams: Stream[]) => {
-            plugin.log(`updating.. (${streams.length} streams available)`)
-            store.state().collection.replaceOne({_id: plugin.id}, {streams: streams}, {upsert: true});
-        });
-
-        plugin.on("started", (stream: Stream) => {
-            plugin.log(`stream ${stream.id} started: ${stream.username}`);
-            notifyAll(plugin, stream);
-        });
-
-        plugin.on("stopped", (stream: Stream) => {
-            plugin.log(`stream ${stream.id} stopped: ${stream.username}`);
-            store.messages().purgeForStreamer(discord, plugin.id, stream.username);
-        });
-
-        plugin.setup()
-        plugin.log("Plugin loaded")
-    })
-}
-
-setup();
+    dispatcher = new Dispatcher(discord, store);
+});
