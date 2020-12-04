@@ -12,6 +12,10 @@
   "plugins": {
     "piczel_tv": {
       "pollInterval": 30000
+    },
+    "twitch_tv": {
+      "clientId": "",
+      "clientSecret": ""
     }
   }
 }
