@@ -67,7 +67,7 @@ export class Dispatcher {
                 messageId: message.id,
                 guildId: channel.guild.id,
                 networkId: plugin.id,
-                streamId: stream.username.toLowerCase(),
+                streamId: stream.username,
             })
         });
     }

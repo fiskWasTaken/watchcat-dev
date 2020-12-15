@@ -1,4 +1,3 @@
-import {Plugin, Stream} from "./plugin";
 import {PollingPlugin} from "./polling";
 
 /**

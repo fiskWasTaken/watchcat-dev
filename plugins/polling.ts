@@ -1,5 +1,4 @@
 import {Plugin, Stream} from "./plugin";
-import {Db} from "mongodb";
 
 /**
  * Master list polling abstract class,
@@ -21,7 +20,7 @@ export abstract class PollingPlugin extends Plugin {
 
     async main() {
         await this.poll();
-        this.collection().replaceOne({_id: this.id}, {streams: this.cache}, {upsert: true});
+        await this.collection().replaceOne({_id: this.id}, {streams: this.cache}, {upsert: true});
     }
 
     async ready() {
@@ -67,5 +66,5 @@ export abstract class PollingPlugin extends Plugin {
         }
     }
 
-    async abstract poll()
+    abstract poll()
 }

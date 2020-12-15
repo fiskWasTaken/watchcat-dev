@@ -19,9 +19,7 @@ const http = require("axios").default.create({
     headers: {"User-Agent": "Watchcat by fisk#8729"}
 });
 
-let mongo: MongoClient;
 let store: Storage;
-
 const discord = new Client();
 
 discord.on("ready", () => {
@@ -29,17 +27,17 @@ discord.on("ready", () => {
 });
 
 discord.on("guildCreate", (guild: Guild) => {
-    guild.owner.user.createDM().then(chan => {
-        chan.send("Hey there - I just wanted to help you set up stream notifications for your server." +
+    guild.owner.user.createDM().then(async chan => {
+        await chan.send("Hey there - I just wanted to help you set up stream notifications for your server." +
             "" +
             "To get started, you will need to define a channel in which updates will be sent. As a server administrator, @mention me from the channel you want me to target.")
     })
 });
 
-discord.on("guildDelete", (guild: Guild) => {
+discord.on("guildDelete", async (guild: Guild) => {
     console.log(`Removed from guild ${guild.name} (${guild.id}) -- removing data.`);
-    store.guilds().delete(guild);
-    store.messages().purgeForGuild(discord, guild);
+    await store.guilds().delete(guild);
+    await store.messages().purgeForGuild(discord, guild);
 });
 
 discord.on("message", async (msg: Message) => {
@@ -65,7 +63,7 @@ discord.on("message", async (msg: Message) => {
         if (await userMayUseCommand(msg.member, commands[command])) {
             commands[command].callable(msg);
         } else {
-            msg.channel.send(new MessageEmbed()
+            await msg.channel.send(new MessageEmbed()
                 .setColor("RED")
                 .setTitle("Insufficient privileges")
                 .setDescription("You do not have the rights to use this command."))
@@ -98,7 +96,7 @@ class PluginManager {
         return this.map[id];
     }
 
-    load(plugin: Plugin) {
+    async load(plugin: Plugin) {
         if (config?.plugins.hasOwnProperty(plugin.id)) {
             plugin.setConfig(config.plugins[plugin.id])
         }
@@ -107,21 +105,21 @@ class PluginManager {
         plugin.setBackend(db)
         plugin.createWebhook(app);
 
-        plugin.on("updated", async (streams: Stream[]) => {
+        plugin.on("updated", async (_: Stream[]) => {
             // nothing to do here
         });
 
-        plugin.on("started", (stream: Stream) => {
+        plugin.on("started", async (stream: Stream) => {
             plugin.log(`stream ${stream.id} started: ${stream.username}`);
-            dispatcher.announceToAll(plugin, stream);
+            await dispatcher.announceToAll(plugin, stream);
         });
 
-        plugin.on("stopped", (stream: Stream) => {
+        plugin.on("stopped", async (stream: Stream) => {
             plugin.log(`stream ${stream.id} stopped: ${stream.username}`);
-            store.messages().purgeForStreamer(discord, plugin.id, stream.username);
+            await store.messages().purgeForStreamer(discord, plugin.id, stream.username);
         });
 
-        plugin.ready()
+        await plugin.ready()
         plugin.log("Plugin loaded")
 
         this.map[plugin.id] = plugin;
@@ -155,7 +153,7 @@ registerCommand({
         const guildInfo = await store.guilds().get(msg.guild);
 
         if (guildInfo && guildInfo.channelId) {
-            store.messages().purgeForChannel(discord, (await discord.channels.fetch(guildInfo.channelId) as TextChannel));
+            await store.messages().purgeForChannel(discord, (await discord.channels.fetch(guildInfo.channelId) as TextChannel));
         }
 
         store.guilds().setChannel(msg.guild, msg.channel.id).then(() => {
@@ -175,7 +173,7 @@ registerCommand({
         const results = Array.from(new Set(args.slice(2))).map(result => plugins.resolveUrl(result)).filter(result => result)
 
         if (results.length == 0) {
-            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch piczel.tv/watch/user1 picarto.tv/user2 ..."));
+            await msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: watch piczel.tv/watch/user1 picarto.tv/user2 ..."));
             return;
         }
 
@@ -206,7 +204,7 @@ registerCommand({
         const results = Array.from(new Set(args.slice(2))).map(result => plugins.resolveUrl(result));
 
         if (results.length == 0) {
-            msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));
+            await msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));
             return;
         }
 
@@ -233,7 +231,7 @@ registerCommand({
 registerCommand({
     description: "(Debug) Get a list of loaded plugins.",
     callable: async (msg: Message) => {
-        msg.channel.send(new MessageEmbed()
+        await msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
             .setTitle("Loaded Plugins")
             .setDescription(plugins.loaded().map(plugin => `${plugin.name} (${plugin.id})`)))
@@ -249,9 +247,9 @@ registerCommand({
         const result = plugins.resolveUrl(args[2]);
 
         if (result.plugin) {
-            msg.channel.send(`Found matching plugin ${result.plugin.name} - ${result.streamId}`)
+            await msg.channel.send(`Found matching plugin ${result.plugin.name} - ${result.streamId}`)
         } else {
-            msg.channel.send(`Can't find matching plugin for ${args[2]}`);
+            await msg.channel.send(`Can't find matching plugin for ${args[2]}`);
         }
     },
     hidden: true,
@@ -265,16 +263,16 @@ registerCommand({
         const result = plugins.resolveUrl(args[2])
 
         if (!result) {
-            msg.channel.send("Can't find a matching plugin")
+            await msg.channel.send("Can't find a matching plugin")
             return
         }
 
         const stream = result.plugin.cachedStream(result.streamId);
 
         if (!stream) {
-            msg.channel.send("Can't find this user online")
+            await msg.channel.send("Can't find this user online")
         } else {
-            msg.channel.send(buildEmbed(result.plugin, stream));
+            await msg.channel.send(buildEmbed(result.plugin, stream));
         }
     },
     hidden: true,
@@ -292,39 +290,18 @@ registerCommand({
 });
 
 registerCommand({
-    description: "(Debug) Simulate the closure of a stream.",
-    callable: async (msg: Message) => {
-        const args = msg.content.split(" ");
-        const result = plugins.resolveUrl(args[2])
-
-        if (!result) {
-            msg.channel.send("Can't find a matching plugin")
-            return
-        }
-
-        await store.messages().purgeForStreamer(discord, result.plugin.id, result.streamId);
-        const stream = result.plugin.cachedStream(args[2]);
-        // todo repair this behaviour!! DO NOT PUSH UNTIL WE FIX THIS
-        //piczel.state.splice(piczel.state.indexOf(stream), 1);
-    },
-    hidden: true,
-    name: "sim_stop",
-    privilege: "OWNER"
-});
-
-registerCommand({
     description: "Grant admin privileges to a given role.",
     callable: async (msg: Message) => {
         const args = msg.content.split(" ");
         const role = msg.guild.roles.resolve(args[2]);
 
         if (!role) {
-            msg.channel.send(new MessageEmbed().setDescription(`Could not find a role matching ID (${role}). Try copying the ID by right-clicking on the role.`).setColor("RED"));
+            await msg.channel.send(new MessageEmbed().setDescription(`Could not find a role matching ID (${role}). Try copying the ID by right-clicking on the role.`).setColor("RED"));
             return;
         }
 
-        store.guilds().grant(msg.guild, role.id);
-        msg.channel.send(new MessageEmbed().setDescription(`Granted admin privileges for role **${role.name}**.`).setColor("GREEN"));
+        await store.guilds().grant(msg.guild, role.id);
+        await msg.channel.send(new MessageEmbed().setDescription(`Granted admin privileges for role **${role.name}**.`).setColor("GREEN"));
     },
     name: "grant",
     privilege: "OWNER",
@@ -340,9 +317,9 @@ registerCommand({
 
         // nb: don't try to naively resolve role here; we might want to remove a deleted role.
         if (result.modifiedCount > 0) {
-            msg.channel.send(new MessageEmbed().setDescription(`Revoked admin privileges for this role.`).setColor("GREEN"));
+            await msg.channel.send(new MessageEmbed().setDescription(`Revoked admin privileges for this role.`).setColor("GREEN"));
         } else {
-            msg.channel.send(new MessageEmbed().setDescription(`Cannot seem to find a role with this ID (${role}). Was it already removed?`).setColor("RED"));
+            await msg.channel.send(new MessageEmbed().setDescription(`Cannot seem to find a role with this ID (${role}). Was it already removed?`).setColor("RED"));
         }
     },
     name: "revoke",
@@ -355,7 +332,7 @@ registerCommand({
         const guildInfo = await store.guilds().get(msg.guild);
 
         if (!guildInfo) {
-            msg.channel.send(new MessageEmbed()
+            await msg.channel.send(new MessageEmbed()
                 .setColor("RED")
                 .setTitle("Setup required")
                 .setDescription(`Select a channel to receive notifications by using the **use** command.`));
@@ -369,7 +346,7 @@ registerCommand({
             }
         });
 
-        msg.channel.send(new MessageEmbed()
+        await msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
             .setTitle("Admins")
             .setDescription("The following roles are able to use Watchcat admin features on this server.")
@@ -386,7 +363,7 @@ registerCommand({
         const guildInfo = await store.guilds().get(msg.guild);
 
         if (!guildInfo) {
-            msg.channel.send(new MessageEmbed()
+            await msg.channel.send(new MessageEmbed()
                 .setColor("RED")
                 .setTitle("Setup required")
                 .setDescription(`Select a channel to receive notifications by using the **use** command.`));
@@ -405,7 +382,7 @@ registerCommand({
             const online = userList.filter(user => plugin.cachedStream(user));
             const offline = userList.filter(user => !plugin.cachedStream(user));
 
-            msg.channel.send(new MessageEmbed()
+            await msg.channel.send(new MessageEmbed()
                 .setColor("BLUE")
                 .setTitle(`Watchcat Status - ${plugin.name}`)
                 .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
@@ -435,17 +412,17 @@ registerCommand({
             embed.addField(priv, opts);
         });
 
-        msg.channel.send(embed);
+        await msg.channel.send(embed);
     },
     name: "help"
 });
 
 registerCommand({
     description: "Information about this bot.",
-    callable: msg => {
+    callable: async msg => {
         const projectUrl = "https://github.com/fisuku/watchcat";
 
-        msg.channel.send(new MessageEmbed()
+        await msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
             .setTitle("Watchcat - Picarto.tv/Piczel.tv notification service")
             .setDescription(`This bot supplies a push notification service for Discord. Want this bot on your server? Invite it from the project home page.`)

@@ -1,7 +1,5 @@
-import {AxiosInstance} from "axios";
 import {Stream} from "./plugin";
 import {PollingPlugin} from "./polling";
-import {Db, MongoClient} from "mongodb";
 
 interface PicartoLanguage {
     language_id: number,

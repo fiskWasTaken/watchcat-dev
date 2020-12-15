@@ -1,5 +1,5 @@
 import {Stream} from "./plugin";
-import TwitchJs, {Api, ApiVersions} from 'twitch-js'
+import TwitchJs, {Api} from 'twitch-js'
 import {PollingPlugin} from "./polling";
 import fetchUtil from "twitch-js/lib/utils/fetch";
 
@@ -50,7 +50,7 @@ export class TwitchPlugin extends PollingPlugin {
             networkId: this.id,
             source: event,
             url: this.resolveStreamUrl(event.userName),
-            username: event.userName.toLowerCase(),
+            username: event.userName,
             viewers: event.viewerCount,
             live_since: event.startedAt,
             preview: event.thumbnailUrl.replace("{width}", "640").replace("{height}", "360"),
@@ -73,6 +73,7 @@ export class TwitchPlugin extends PollingPlugin {
 
         this.log("Checking users: " + collect.join(", "))
 
+        // todo: if 'collect' is empty this is going to query everyone
         // todo: is currently only going to work with up to 100 users with this model.
         // instead of doing 100 user splits, we should really move to webhooks, but I'm lazy
         const result = await this.api.get(`streams`, {
