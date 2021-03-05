@@ -27,6 +27,7 @@ discord.on("ready", () => {
 });
 
 discord.on("guildCreate", (guild: Guild) => {
+    console.log(`Added to guild ${guild.name} (${guild.id}).`);
     guild.owner.user.createDM().then(async chan => {
         await chan.send("Hey there - I just wanted to help you set up stream notifications for your server." +
             "" +
