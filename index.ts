@@ -93,7 +93,7 @@ class PluginManager {
         return Object.values(this.map);
     }
 
-    get(id: string): Plugin|null {
+    get(id: string): Plugin | null {
         return this.map[id];
     }
 

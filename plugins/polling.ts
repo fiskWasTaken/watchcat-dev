@@ -28,7 +28,7 @@ export abstract class PollingPlugin extends Plugin {
 
         const contents = await this.collection().findOne({_id: this.id});
         this.cache = (contents && contents.streams || []) as Stream[];
-        this.log(`Resuming from previous state; ${this.cache.length} streams in store. Polling every ${pollInterval/1000}s`);
+        this.log(`Resuming from previous state; ${this.cache.length} streams in store. Polling every ${pollInterval / 1000}s`);
 
         await this.main()
 

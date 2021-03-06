@@ -1,7 +1,5 @@
-import {AxiosInstance} from "axios";
 import {Stream} from "./plugin";
 import {PollingPlugin} from "./polling";
-import {Db, MongoClient} from "mongodb";
 
 interface PiczelResource {
     url: string;

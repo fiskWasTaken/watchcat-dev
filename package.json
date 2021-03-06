@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "ts-node --trace-warnings index"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["discord"],
+  "author": "fisk",
   "license": "MIT",
   "dependencies": {
     "@types/express": "^4.17.9",

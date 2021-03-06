@@ -38,7 +38,11 @@ export class Dispatcher {
      * todo: find many
      */
     async unannounce(guild: Guild, networkId: string, streamId: string) {
-        const previous = await this.store.messages().collection.findOneAndDelete({guildId: guild.id, networkId, streamId});
+        const previous = await this.store.messages().collection.findOneAndDelete({
+            guildId: guild.id,
+            networkId,
+            streamId
+        });
 
         if (previous.value) {
             this.log("Cleared existing notify for user " + streamId);
