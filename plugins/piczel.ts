@@ -82,7 +82,7 @@ export class PiczelPlugin extends PollingPlugin {
             networkId: this.id,
             source: ps,
             url: this.resolveStreamUrl(ps.username),
-            preview: `https://piczel.tv/screenshots/stream_${ps.id}.jpg`,
+            preview: `https://piczel.tv/screenshots/stream_${ps.id}.jpg?s=${ps.live_since}`,
             avatar: ps.user.avatar.url
         }
     }

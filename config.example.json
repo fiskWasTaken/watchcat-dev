@@ -1,6 +1,7 @@
 {
   "discord": {
-    "token": "insert bot token here"
+    "token": "insert bot token here",
+    "inviteUrl": "oauth invite url for sharing"
   },
   "mongo": {
     "url": "mongodb://string",

@@ -11,7 +11,6 @@ import {Command} from "./commands";
 import {buildEmbed, Dispatcher} from "./dispatcher";
 
 const express = require('express')
-
 const config = require("./config.json");
 const app = express()
 
@@ -419,15 +418,15 @@ registerCommand({
 });
 
 registerCommand({
-    description: "Information about this bot.",
+    description: "Information about this bot, and the invite link.",
     callable: async msg => {
         const projectUrl = "https://github.com/fisuku/watchcat";
 
         await msg.channel.send(new MessageEmbed()
             .setColor("BLUE")
-            .setTitle("Watchcat - Picarto.tv/Piczel.tv notification service")
-            .setDescription(`This bot supplies a push notification service for Discord. Want this bot on your server? Invite it from the project home page.`)
-            .addField("Project Home", projectUrl)
+            .setTitle("Watchcat - stream notification service")
+            .setDescription(`This bot supplies a push notification service for Discord. You can add this bot to your server using the invite URL.`)
+            .addField("Invite URL", config.inviteUrl)
             .setURL(projectUrl));
     },
     name: "about",
