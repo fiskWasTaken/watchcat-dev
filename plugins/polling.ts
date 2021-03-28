@@ -19,7 +19,13 @@ export abstract class PollingPlugin extends Plugin {
     }
 
     async main() {
-        await this.poll();
+        try {
+            await this.poll();
+        } catch (e) {
+            console.error("Poll failure:")
+            console.trace(e)
+        }
+
         await this.collection().replaceOne({_id: this.id}, {streams: this.cache}, {upsert: true});
     }
 

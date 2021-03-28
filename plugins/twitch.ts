@@ -71,6 +71,10 @@ export class TwitchPlugin extends PollingPlugin {
         // step one: concatenate our target users to make requests for
         const collect = await this.globalFollows();
 
+        if (collect.length == 0) {
+            return;
+        }
+
         this.log("Checking users: " + collect.join(", "))
 
         // todo: if 'collect' is empty this is going to query everyone

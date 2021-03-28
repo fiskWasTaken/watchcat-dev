@@ -6,7 +6,9 @@
   "scripts": {
     "start": "ts-node --trace-warnings index"
   },
-  "keywords": ["discord"],
+  "keywords": [
+    "discord"
+  ],
   "author": "fisk",
   "license": "MIT",
   "dependencies": {
@@ -14,6 +16,7 @@
     "@types/mongodb": "^3.5.5",
     "@types/node": "^14.14.10",
     "axios": "^0.19.2",
+    "cloudscraper": "^4.6.0",
     "colorts": "^0.1.63",
     "discord.js": "^12.1.1",
     "express": "^4.17.1",
