@@ -382,12 +382,20 @@ registerCommand({
             const online = userList.filter(user => plugin.cachedStream(user));
             const offline = userList.filter(user => !plugin.cachedStream(user));
 
-            await msg.channel.send(new MessageEmbed()
+            const e = new MessageEmbed()
                 .setColor("BLUE")
                 .setTitle(`Watchcat Status - ${plugin.name}`)
-                .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`)
-                .addField(`Online (${online.length})`, online.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n") || "(empty.)")
-                .addField(`Offline (${offline.length})`, offline.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n") || "(empty.)"));
+                .setDescription(`Posting stream updates to  <#${guildInfo.channelId}>.`);
+
+            if (online.length > 0) {
+                e.addField(`Online (${online.length})`, online.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n"));
+            }
+
+            if (offline.length > 0) {
+                e.addField(`Offline (${offline.length})`, offline.map(username => `**${username}** ${plugin.resolveStreamUrl(username)}`).join("\n"));
+            }
+
+            await msg.channel.send(e);
         }
 
     }
