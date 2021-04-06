@@ -148,17 +148,34 @@ function registerCommand(command: Command) {
 }
 
 registerCommand({
-    description: "Designates the current channel for stream updates.",
+    description: "Designates the specified channel for stream updates.",
     callable: async (msg: Message) => {
-        const guildInfo = await store.guilds().get(msg.guild);
+        const guildInfo = await store.guilds().get(msg.guild)
+        const args = msg.content.split(" ");
+
+        if (!args[2]) {
+            msg.channel.send(new MessageEmbed()
+                .setDescription(`Please specify a channel (right-click, copy ID with developer mode enabled).`)
+                .setColor("RED"));
+            return;
+        }
+
+        const channel = msg.guild.channels.resolve(args[2]);
+
+        if (!channel) {
+            msg.channel.send(new MessageEmbed()
+                .setDescription(`Could not find channelID ${args[2]}.`)
+                .setColor("RED"));
+            return;
+        }
 
         if (guildInfo && guildInfo.channelId) {
             await store.messages().purgeForChannel(discord, (await discord.channels.fetch(guildInfo.channelId) as TextChannel));
         }
 
-        store.guilds().setChannel(msg.guild, msg.channel.id).then(() => {
+        store.guilds().setChannel(msg.guild, channel.id).then(() => {
             msg.channel.send(new MessageEmbed()
-                .setDescription(`<#${msg.channel.id}> is now set to receive notifications.`)
+                .setDescription(`<#${channel.id}> is now set to receive notifications.`)
                 .setColor("GREEN"));
         });
     },
