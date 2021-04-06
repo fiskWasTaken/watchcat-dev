@@ -474,7 +474,7 @@ registerCommand({
             .setColor("BLUE")
             .setTitle("Watchcat - stream notification service")
             .setDescription(`This bot supplies a push notification service for Discord. You can add this bot to your server using the invite URL.`)
-            .addField("Invite URL", config.inviteUrl)
+            .addField("Invite URL", config.discord.inviteUrl)
             .setURL(projectUrl));
     },
     name: "about",
