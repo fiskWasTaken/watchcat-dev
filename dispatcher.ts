@@ -64,6 +64,15 @@ export class Dispatcher {
         this.log("Announcing stream in channel " + channel.id);
         const messages = this.store.messages().collection;
 
+        const guild = await this.store.guilds().get(channel.guild);
+
+        if (guild.pingRole) {
+            // if there's a ping role we just send a message and nuke it right away
+            channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
+                message.delete();
+            });
+        }
+
         return channel.send(buildEmbed(plugin, stream)).then(message => {
             this.log("Announcement success: " + channel.id);
             messages.insertOne({

@@ -6,6 +6,7 @@ export interface GuildData {
     networks: { [key: string]: Network };
     channelId?: string;
     adminRoles?: string[];
+    pingRole?: string;
 }
 
 export interface Network {
@@ -23,8 +24,7 @@ export interface ManagedMessage {
 
 export class Storage {
     constructor(private db: Db) {
-        db.collection("guilds").createIndex({"guildId": 1}, {unique: true}).then(_ => {
-        })
+        db.collection("guilds").createIndex({"guildId": 1}, {unique: true});
     }
 
     guilds(): Guilds {
@@ -54,6 +54,22 @@ export class Guilds extends Model<GuildData> {
         return this.collection.updateOne(
             {guildId: guild.id},
             {$set: {channelId: channelId}},
+            {upsert: true}
+        );
+    }
+
+    setPingRole(guild: Guild, roleId: string) {
+        return this.collection.updateOne(
+            {guildId: guild.id},
+            {$set: {pingRole: roleId}},
+            {upsert: true}
+        );
+    }
+
+    unsetPingRole(guild: Guild) {
+        return this.collection.updateOne(
+            {guildId: guild.id},
+            {$unset: {pingRole: 1}},
             {upsert: true}
         );
     }
