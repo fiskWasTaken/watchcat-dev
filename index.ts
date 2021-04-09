@@ -46,6 +46,10 @@ discord.on("message", async (msg: Message) => {
         return;
     }
 
+    if (msg.mentions.everyone) {
+        return;
+    }
+
     if (!hasSendMessagePrivilege(msg.channel as TextChannel)) {
         console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
 
