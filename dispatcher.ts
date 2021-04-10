@@ -70,7 +70,9 @@ export class Dispatcher {
         if (guild.pingRole) {
             // if there's a ping role we just send a message and nuke it right away
             channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
-                message.delete();
+                setTimeout(() => {
+                    message.delete();
+                }, 1000);
             });
         }
 
