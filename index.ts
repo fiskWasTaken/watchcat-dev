@@ -21,8 +21,6 @@ interface ResolveResult {
     streamId: string
 }
 
-let dispatcher: Dispatcher
-
 const commands: { [key: string]: Command } = {};
 
 let store: Storage;
@@ -40,6 +38,9 @@ export interface Env {
 }
 
 class HandlerManager {
+    constructor(private dispatcher: Dispatcher) {
+    }
+
     private map: { [key: string]: Handler } = {};
 
     loaded(): Handler[] {
@@ -62,7 +63,7 @@ class HandlerManager {
 
         handler.on("started", async (stream: Stream) => {
             handler.log(`stream ${stream.id} started: ${stream.username}`);
-            await dispatcher.announceToAll(handler, stream);
+            await this.dispatcher.announceToAll(handler, stream);
         });
 
         handler.on("stopped", async (stream: Stream) => {
@@ -87,29 +88,8 @@ class HandlerManager {
     }
 }
 
-const handlers = new HandlerManager();
-
 discord.on("ready", () => {
-    console.log(`Logged in as ${discord.user.tag}. Registering commands...`);
-
-    fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(async f => {
-        const command = f({discord, store, dispatcher, handlers, commands, config});
-        command.privilege = command.privilege || "USER";
-        commands[command.name] = command;
-
-        if (command.options) {
-            try {
-                await discord.application.commands.create({
-                    "name": command.name,
-                    "description": command.description,
-                    "options": command.options
-                })
-            } catch (e) {
-                console.log(`Couldn't create command for ${command.name}`)
-                console.log(e);
-            }
-        }
-    });
+    console.log(`Logged in as ${discord.user.tag}.`);
 });
 
 discord.on("guildCreate", (guild: Guild) => {
@@ -257,16 +237,34 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
 
     const files = fs.readdirSync('./handlers').filter(f => f.endsWith('.ts')).filter(enabled);
 
+    const dispatcher = new Dispatcher(discord, store);
+    const handlers = new HandlerManager(dispatcher);
+
     await Promise.all(files.map(async f => {
         const handler = new (require(`./handlers/${f}`).default)(config.handlers[handlerId(f)]);
         await handlers.load(handler);
     }));
 
-    dispatcher = new Dispatcher(discord, store);
+    await discord.login(config.discord.token);
 
-    discord.login(config.discord.token).then(async () => {
-        console.log("Discord client is ready")
-    }).catch(() => {
-        console.log("Failed to sign in to Discord?")
+    console.log("Registering commands")
+
+    fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(async f => {
+        const command = f({discord, store, dispatcher, handlers, commands, config});
+        command.privilege = command.privilege || "USER";
+        commands[command.name] = command;
+
+        if (command.options) {
+            try {
+                await discord.application.commands.create({
+                    "name": command.name,
+                    "description": command.description,
+                    "options": command.options
+                })
+            } catch (e) {
+                console.log(`Couldn't create command for ${command.name}`)
+                console.log(e);
+            }
+        }
     });
 });
