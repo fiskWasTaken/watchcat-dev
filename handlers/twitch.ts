@@ -22,7 +22,7 @@ export default class TwitchHandler extends PollingHandler {
     private api: Api;
 
     constructor(config: { [key: string]: any }) {
-        super(config,"twitch.tv", "twitch_tv")
+        super(config, "twitch.tv", "twitch_tv")
 
         const onAuthenticationFailure = () =>
             fetchUtil('https://id.twitch.tv/oauth2/token', {

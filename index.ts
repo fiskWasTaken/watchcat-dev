@@ -1,4 +1,4 @@
-import {Client, Guild, GuildMember, Message, MessageEmbed, TextChannel} from "discord.js";
+import {Client, CommandInteraction, Guild, GuildMember, Message, MessageEmbed, TextChannel} from "discord.js";
 import {Db, MongoClient} from "mongodb";
 import {Storage} from "./model";
 import {runMigrations} from "./migrations";
@@ -26,7 +26,9 @@ let dispatcher: Dispatcher
 const commands: { [key: string]: Command } = {};
 
 let store: Storage;
-const discord = new Client();
+const discord = new Client({
+    intents: ["GUILD_MESSAGES", "GUILDS"]
+});
 
 export interface Env {
     discord: Client,
@@ -49,6 +51,7 @@ class HandlerManager {
     }
 
     async load(handler: Handler) {
+        this.map[handler.id] = handler;
         handler.setTransport(http);
         handler.setBackend(db)
         handler.createWebhook(app);
@@ -69,8 +72,6 @@ class HandlerManager {
 
         await handler.ready()
         handler.log("Handler loaded")
-
-        this.map[handler.id] = handler;
     }
 
     resolveUrl(url: string): ResolveResult | null {
@@ -89,7 +90,26 @@ class HandlerManager {
 const handlers = new HandlerManager();
 
 discord.on("ready", () => {
-    console.log(`Logged in as ${discord.user.tag}.`);
+    console.log(`Logged in as ${discord.user.tag}. Registering commands...`);
+
+    fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(async f => {
+        const command = f({discord, store, dispatcher, handlers, commands, config});
+        command.privilege = command.privilege || "USER";
+        commands[command.name] = command;
+
+        if (command.options) {
+            try {
+                await discord.application.commands.create({
+                    "name": command.name,
+                    "description": command.description,
+                    "options": command.options
+                })
+            } catch (e) {
+                console.log(`Couldn't create command for ${command.name}`)
+                console.log(e);
+            }
+        }
+    });
 });
 
 discord.on("guildCreate", (guild: Guild) => {
@@ -107,6 +127,27 @@ discord.on("guildDelete", async (guild: Guild) => {
     await store.messages().purgeForGuild(discord, guild);
 });
 
+discord.on("interaction", async (interaction: CommandInteraction) => {
+    const command = interaction.commandName;
+
+    try {
+        if (await userMayUseCommand(interaction.member, commands[command])) {
+            await interaction.reply(await commands[command].callable(
+                interaction.guild,
+                interaction.options.map(opt => opt.value)
+            ));
+        } else {
+            await interaction.reply(new MessageEmbed()
+                .setColor("RED")
+                .setTitle("Insufficient privileges")
+                .setDescription("You do not have the rights to use this command."))
+        }
+    } catch (e) {
+        // unknown interaction
+        console.log(e)
+    }
+});
+
 discord.on("message", async (msg: Message) => {
     if (!msg.mentions.has(discord.user) || msg.author.id == discord.user.id) {
         // message isn't intended for me
@@ -117,7 +158,7 @@ discord.on("message", async (msg: Message) => {
         return;
     }
 
-    if (!hasSendMessagePrivilege(msg.channel as TextChannel)) {
+    if (!await hasSendMessagePrivilege(msg.channel as TextChannel)) {
         console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
 
         msg.guild.owner.createDM().then(dm => {
@@ -127,12 +168,14 @@ discord.on("message", async (msg: Message) => {
         return;
     }
 
-    console.log("received message " + msg.content);
+    console.log("received text message " + msg.content);
 
-    const command = msg.content.split(" ")[1];
+    const args = msg.content.split(/\s+/g);
+    const command = args[1];
+
     if (commands.hasOwnProperty(command)) {
         if (await userMayUseCommand(msg.member, commands[command])) {
-            commands[command].callable(msg);
+            await msg.channel.send(await commands[command].callable(msg.guild, args.slice(2)));
         } else {
             await msg.channel.send(new MessageEmbed()
                 .setColor("RED")
@@ -141,36 +184,32 @@ discord.on("message", async (msg: Message) => {
         }
     } else {
         console.log(`not a command ${command}, showing help`);
-        commands["help"].callable(msg);
+        commands["help"].callable(msg.guild, []);
     }
 });
 
-discord.login(config.discord.token).then(async () => {
-    console.log("Discord client is ready")
-}).catch(() => {
-    console.log("Failed to sign in to Discord?")
-});
-
-export async function testGuildStatus(msg: Message) {
-    const guildInfo = await store.guilds().get(msg.guild);
+export async function testGuildStatus(guild: Guild) {
+    const guildInfo = await store.guilds().get(guild);
 
     if (!guildInfo) {
-        await msg.channel.send(new MessageEmbed()
-            .setColor("RED")
-            .setTitle("Setup required")
-            .setDescription(`Select a channel to receive notifications by using the **use** command.`));
+        // todo
+        // await msg.channel.send(new MessageEmbed()
+        //     .setColor("RED")
+        //     .setTitle("Setup required")
+        //     .setDescription(`Select a channel to receive notifications by using the **use** command.`));
         return false;
     }
 
     return true;
 }
 
-function hasSendMessagePrivilege(channel: TextChannel) {
-    return channel.guild.member(discord.user).permissionsIn(channel).has("SEND_MESSAGES");
+async function hasSendMessagePrivilege(channel: TextChannel) {
+    const user = await channel.guild.members.fetch(discord.user)
+    return user.permissionsIn(channel).has("SEND_MESSAGES");
 }
 
 function userIsOwner(member: GuildMember) {
-    return member.hasPermission("ADMINISTRATOR");
+    return member.permissions.has("ADMINISTRATOR");
 }
 
 async function userIsAdmin(member: GuildMember) {
@@ -216,19 +255,18 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
     console.log("Running DB migrations...");
     await runMigrations(store);
 
-    fs.readdirSync('./handlers')
-        .filter(f => f.endsWith('.ts'))
-        .filter(enabled)
-        .forEach(f => {
-            const handler = new (require(`./handlers/${f}`).default)(config.handlers[handlerId(f)]);
-            handlers.load(handler);
-        });
+    const files = fs.readdirSync('./handlers').filter(f => f.endsWith('.ts')).filter(enabled);
+
+    await Promise.all(files.map(async f => {
+        const handler = new (require(`./handlers/${f}`).default)(config.handlers[handlerId(f)]);
+        await handlers.load(handler);
+    }));
 
     dispatcher = new Dispatcher(discord, store);
 
-    fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(f => {
-        const command = f({discord, store, dispatcher, handlers, commands, config});
-        command.privilege = command.privilege || "USER";
-        commands[command.name] = command;
+    discord.login(config.discord.token).then(async () => {
+        console.log("Discord client is ready")
+    }).catch(() => {
+        console.log("Failed to sign in to Discord?")
     });
 });

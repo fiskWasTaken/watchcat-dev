@@ -1,40 +1,45 @@
-import {Message, MessageEmbed, TextChannel} from "discord.js";
+import {Guild, MessageEmbed, TextChannel} from "discord.js";
 import {Env} from "../index";
 
 module.exports = (env: Env) => {
     return {
         description: "Designates the specified channel for stream updates.",
-        callable: async (msg: Message) => {
-            const guildInfo = await env.store.guilds().get(msg.guild)
-            const args = msg.content.split(" ");
+        callable: async (guild: Guild, args: any[]) => {
+            const guildInfo = await env.store.guilds().get(guild)
 
-            if (!args[2]) {
-                await msg.channel.send(new MessageEmbed()
+            if (!args[0]) {
+                return new MessageEmbed()
                     .setDescription(`Please specify a channel (right-click, copy ID with developer mode enabled).`)
-                    .setColor("RED"));
-                return;
+                    .setColor("RED");
             }
 
-            const channel = msg.guild.channels.resolve(args[2]);
+            const channel = guild.channels.resolve(args[0]);
 
             if (!channel) {
-                await msg.channel.send(new MessageEmbed()
-                    .setDescription(`Could not find channelID ${args[2]}.`)
-                    .setColor("RED"));
-                return;
+                return new MessageEmbed()
+                    .setDescription(`Could not find channelID ${args[0]}.`)
+                    .setColor("RED");
             }
 
             if (guildInfo && guildInfo.channelId) {
                 await env.store.messages().purgeForChannel(env.discord, (await env.discord.channels.fetch(guildInfo.channelId) as TextChannel));
             }
 
-            env.store.guilds().setChannel(msg.guild, channel.id).then(() => {
-                msg.channel.send(new MessageEmbed()
-                    .setDescription(`<#${channel.id}> is now set to receive notifications.`)
-                    .setColor("GREEN"));
-            });
+            await env.store.guilds().setChannel(guild, channel.id);
+
+            return new MessageEmbed()
+                .setDescription(`<#${channel.id}> is now set to receive notifications.`)
+                .setColor("GREEN");
         },
         name: "use",
-        privilege: "ADMIN"
+        privilege: "ADMIN",
+        options: [
+            {
+                name: "channel",
+                description: "channel",
+                type: "CHANNEL",
+                required: true,
+            }
+        ],
     };
 };

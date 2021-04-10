@@ -18,7 +18,7 @@
     "axios": "^0.19.2",
     "cloudscraper": "^4.6.0",
     "colorts": "^0.1.63",
-    "discord.js": "^12.1.1",
+    "discord.js": "git@github.com:vaporox/discord.js.git#f2217d30147017dde54f538b6f854471eef4046e",
     "express": "^4.17.1",
     "mongodb": "^3.5.5",
     "request": "^2.88.2",

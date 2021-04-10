@@ -14,7 +14,7 @@ import {PollingHandler} from "./polling";
 
 export default class PomfHandler extends PollingHandler {
     constructor(config: { [key: string]: any }) {
-        super(config,"Pomf.TV", "pomf_tv")
+        super(config, "Pomf.TV", "pomf_tv")
     }
 
     match(url: string): string | null {

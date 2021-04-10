@@ -21,7 +21,7 @@ export class DummyClient extends Handler {
     }
 
     constructor(config: { [key: string]: any }) {
-        super(config,"DummyClient", "dummy_client")
+        super(config, "DummyClient", "dummy_client")
     }
 
     cachedStream(streamId: string): Stream {

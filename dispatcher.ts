@@ -1,6 +1,7 @@
 import {Client, Guild, MessageEmbed, TextChannel} from "discord.js";
 import {GuildData, Storage} from "./model";
 import {Handler, Stream} from "./handlers/handler";
+import color from "colorts";
 
 export function buildEmbed(handler: Handler, stream: Stream) {
     const footerFrags = [handler.name];
@@ -30,7 +31,7 @@ export class Dispatcher {
     }
 
     log(message: string) {
-        console.log(`[Dispatcher] ${message}`)
+        console.log(`[${color("Dispatcher").blue}] ${message}`);
     }
 
     /**
@@ -93,7 +94,6 @@ export class Dispatcher {
     async announceToAll(handler: Handler, stream: Stream) {
         const doc = {};
         doc[`networks.${handler.id}.streams`] = {$regex: `^${stream.username}$`, $options: 'i'};
-        console.log(doc);
 
         this.store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
             return this.announceToChannel(

@@ -118,7 +118,7 @@ export class ManagedMessages extends Model<ManagedMessage> {
         await this.collection.deleteOne({_id: msg._id});
 
         discord.channels.fetch(msg.channelId).then(chan => {
-            (chan as TextChannel).messages.delete(msg.messageId, "bot managed");
+            (chan as TextChannel).messages.delete(msg.messageId);
         });
 
         console.log("purged managed message " + msg.messageId);

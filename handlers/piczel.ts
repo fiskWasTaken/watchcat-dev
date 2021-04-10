@@ -61,7 +61,7 @@ interface PiczelStreamsRequestParams {
 
 export default class PiczelHandler extends PollingHandler {
     constructor(config: { [key: string]: any }) {
-        super(config,"Piczel.tv", "piczel_tv")
+        super(config, "Piczel.tv", "piczel_tv")
     }
 
     resolveStreamUrl(username: string): string {

@@ -1,35 +1,42 @@
-import {Message, MessageEmbed} from "discord.js";
+import {Guild, MessageEmbed} from "discord.js";
 import {Env} from "../index";
 
 module.exports = (env: Env) => {
     return {
         description: "Remove one or more user(s) from the watchlist.",
-        callable: async (msg: Message) => {
-            const args = msg.content.split(" ");
-            const results = Array.from(new Set(args.slice(2))).map(result => env.handlers.resolveUrl(result));
+        callable: async (guild: Guild, args: any[]) => {
+            const results = Array.from(new Set(args)).map(result => env.handlers.resolveUrl(result));
 
             if (results.length == 0) {
-                await msg.channel.send(new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ..."));
-                return;
+                return new MessageEmbed().setColor("BLUE").setDescription("**Usage**: unwatch piczel.tv/watch/user1 picarto.tv/user2 ...");
             }
 
             results.forEach(result => {
-                env.dispatcher.unannounce(msg.guild, result.handler.id, result.streamId);
+                env.dispatcher.unannounce(guild, result.handler.id, result.streamId);
             });
 
-            Promise.all(results.map((result) => env.store.guilds().unwatch(msg.guild, result.handler.id, result.streamId))).then(results => {
-                const modified = results.filter(result => result.modifiedCount > 0).length;
-                const unmodified = results.length - modified;
-                let result = `${modified} user(s) removed from watchlist.`;
+            const res = await Promise.all(results.map((result) => env.store.guilds().unwatch(guild, result.handler.id, result.streamId)));
 
-                if (unmodified) {
-                    result += ` ${unmodified} user(s) were not present.`;
-                }
+            const modified = res.filter(result => result.modifiedCount > 0).length;
+            const unmodified = res.length - modified;
 
-                msg.channel.send(new MessageEmbed().setColor("GREEN").setDescription(result))
-            });
+            let result = `${modified} user(s) removed from watchlist.`;
+
+            if (unmodified) {
+                result += ` ${unmodified} user(s) were not present.`;
+            }
+
+            return new MessageEmbed().setColor("GREEN").setDescription(result)
         },
         name: "unwatch",
         privilege: "ADMIN",
+        options: [
+            {
+                name: "url",
+                description: "full stream URL",
+                type: "STRING",
+                required: true,
+            }
+        ],
     }
 };

@@ -1,11 +1,11 @@
-import {Message, MessageEmbed} from "discord.js";
+import {Guild, MessageEmbed} from "discord.js";
 import {Command} from "../commands";
 import {Env} from "../index";
 
 module.exports = (env: Env) => {
     return {
         description: "View this help page.",
-        callable: async (msg: Message) => {
+        callable: async (guild: Guild, args: any[]) => {
             const embed = new MessageEmbed()
                 .setTitle("Watchcat")
                 .setDescription("Discord stream push notification service. OWNER commands require a user to have the Administrator permission.")
@@ -22,8 +22,9 @@ module.exports = (env: Env) => {
                 embed.addField(priv, opts);
             });
 
-            await msg.channel.send(embed);
+            return embed;
         },
+        options: [],
         name: "help"
     }
 };

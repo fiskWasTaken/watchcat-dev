@@ -38,7 +38,7 @@ export abstract class Handler {
     protected db: Db;
     protected events: HandlerEvents = {};
 
-    protected constructor(protected config: {[key: string]: any}, public name: string, public id: string) {
+    protected constructor(protected config: { [key: string]: any }, public name: string, public id: string) {
         this.events.started = (_: Stream) => null;
         this.events.stopped = (_: Stream) => null;
         this.events.updated = (_: Stream[]) => null;

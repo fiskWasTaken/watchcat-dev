@@ -4,8 +4,8 @@
 
 Watchcat is a Discord service designed to handle multiple streaming services.
 
-Messages stay synchronised. If a stream goes offline, it will delete the related announcement. This makes it
-suitable for use in a designated stream channel.
+Messages stay synchronised. If a stream goes offline, it will delete the related announcement. This makes it suitable
+for use in a designated stream channel.
 
 ## Usage
 
