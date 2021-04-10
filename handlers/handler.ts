@@ -1,4 +1,4 @@
-// generic streamer interface we expect plugins to conform to
+// generic streamer interface we expect events to conform to
 import color from 'colorts';
 
 import {AxiosInstance} from "axios";
@@ -24,25 +24,24 @@ export interface Stream {
     url: string; // stream url
 }
 
-export interface PluginEvents {
+export interface HandlerEvents {
     started?: (stream: Stream) => void;
     stopped?: (stream: Stream) => void;
     updated?: (streams: Stream[]) => void;
 }
 
-export abstract class Plugin {
+export abstract class Handler {
     /**
-     * config vars set in config.json for this plugin
+     * config vars set in config.json for this handler
      */
-    protected config: any;
     protected http: AxiosInstance;
     protected db: Db;
-    protected handlers: PluginEvents = {};
+    protected events: HandlerEvents = {};
 
-    protected constructor(public name, public id) {
-        this.handlers.started = (_: Stream) => null;
-        this.handlers.stopped = (_: Stream) => null;
-        this.handlers.updated = (_: Stream[]) => null;
+    protected constructor(protected config: {[key: string]: any}, public name: string, public id: string) {
+        this.events.started = (_: Stream) => null;
+        this.events.stopped = (_: Stream) => null;
+        this.events.updated = (_: Stream[]) => null;
         this.http = require("axios").default.create();
     }
 
@@ -67,10 +66,6 @@ export abstract class Plugin {
         this.http = http;
     }
 
-    setConfig(config: any) {
-        this.config = config;
-    }
-
     createWebhook(app: Express) {
         app.get(`/webhooks/${this.id}`, (req, res) => {
             this.onWebhookEvent(req, res)
@@ -78,7 +73,7 @@ export abstract class Plugin {
     }
 
     /**
-     * log plugin message to stdout or whatever
+     * log handler message to stdout or whatever
      * @param data
      */
     log(data: string): void {
@@ -86,7 +81,7 @@ export abstract class Plugin {
     }
 
     on(event, func) {
-        this.handlers[event] = func;
+        this.events[event] = func;
     }
 
     /**

@@ -1,9 +1,9 @@
-import {Plugin, Stream} from "./plugin";
+import {Handler, Stream} from "./handler";
 
 /**
  * example client
  */
-export class DummyClient extends Plugin {
+export class DummyClient extends Handler {
     public dummy: Stream = {
         id: 1,
         networkId: "dummy_client",
@@ -20,8 +20,8 @@ export class DummyClient extends Plugin {
         url: this.resolveStreamUrl("dummy")
     }
 
-    constructor() {
-        super("DummyClient", "dummy_client")
+    constructor(config: { [key: string]: any }) {
+        super(config,"DummyClient", "dummy_client")
     }
 
     cachedStream(streamId: string): Stream {

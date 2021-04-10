@@ -1,4 +1,4 @@
-import {PollingPlugin} from "./polling";
+import {PollingHandler} from "./polling";
 
 /**
  * important URLs
@@ -12,9 +12,9 @@ import {PollingPlugin} from "./polling";
  * - strategy: collaborate all pomf users in database, and fire off
  */
 
-export class PomfPlugin extends PollingPlugin {
-    constructor() {
-        super("Pomf.TV", "pomf_tv")
+export default class PomfHandler extends PollingHandler {
+    constructor(config: { [key: string]: any }) {
+        super(config,"Pomf.TV", "pomf_tv")
     }
 
     match(url: string): string | null {
@@ -50,7 +50,7 @@ export class PomfPlugin extends PollingPlugin {
             } else if (status == "0") {
                 if (known) {
                     this.log(`${user} is now offline.`)
-                    this.handlers.stopped(known)
+                    this.events.stopped(known)
                     this.cache.splice(this.cache.indexOf(known), 1)
                 }
             } else if (status == "1") {
@@ -66,7 +66,7 @@ export class PomfPlugin extends PollingPlugin {
                     }
 
                     this.cache.push(doc)
-                    this.handlers.started(doc)
+                    this.events.started(doc)
                 }
             } else {
                 // no fucking idea what this is
@@ -74,7 +74,7 @@ export class PomfPlugin extends PollingPlugin {
             }
         }
 
-        this.handlers.updated(this.cache)
+        this.events.updated(this.cache)
     }
 
     /**

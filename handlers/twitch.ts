@@ -1,6 +1,6 @@
-import {Stream} from "./plugin";
+import {Stream} from "./handler";
 import TwitchJs, {Api} from 'twitch-js'
-import {PollingPlugin} from "./polling";
+import {PollingHandler} from "./polling";
 import fetchUtil from "twitch-js/lib/utils/fetch";
 
 interface TwitchStream {
@@ -18,15 +18,11 @@ interface TwitchStream {
     tagIds: number[],
 }
 
-export class TwitchPlugin extends PollingPlugin {
+export default class TwitchHandler extends PollingHandler {
     private api: Api;
 
-    constructor() {
-        super("twitch.tv", "twitch_tv")
-    }
-
-    setConfig(config: any) {
-        this.config = config;
+    constructor(config: { [key: string]: any }) {
+        super(config,"twitch.tv", "twitch_tv")
 
         const onAuthenticationFailure = () =>
             fetchUtil('https://id.twitch.tv/oauth2/token', {
@@ -77,7 +73,6 @@ export class TwitchPlugin extends PollingPlugin {
 
         this.log("Checking users: " + collect.join(", "))
 
-        // todo: if 'collect' is empty this is going to query everyone
         // todo: is currently only going to work with up to 100 users with this model.
         // instead of doing 100 user splits, we should really move to webhooks, but I'm lazy
         const result = await this.api.get(`streams`, {
@@ -87,7 +82,7 @@ export class TwitchPlugin extends PollingPlugin {
         });
 
         const newContents = result.data.map(stream => this.toStream(stream));
-        this.handlers.updated(newContents);
+        this.events.updated(newContents);
         this.compare(this.cache, newContents);
         this.cache = newContents as any;
     }

@@ -1,11 +1,11 @@
-import {Plugin, Stream} from "./plugin";
+import {Handler, Stream} from "./handler";
 
 /**
  * Master list polling abstract class,
  * for small sites where grabbing a master list of streamers
  * every few minutes is feasible
  */
-export abstract class PollingPlugin extends Plugin {
+export abstract class PollingHandler extends Handler {
     public cache: Stream[] = [];
 
     cachedStream(username: string): Stream | null {
@@ -60,14 +60,14 @@ export abstract class PollingPlugin extends Plugin {
         // check added
         for (let key in current) {
             if (!previous[key]) {
-                this.handlers.started(current[key])
+                this.events.started(current[key])
             }
         }
 
         // check removed
         for (let key in previous) {
             if (!current[key]) {
-                this.handlers.stopped(previous[key])
+                this.events.stopped(previous[key])
             }
         }
     }

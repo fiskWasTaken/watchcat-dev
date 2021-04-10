@@ -1,5 +1,6 @@
-import {Stream} from "./plugin";
-import {PollingPlugin} from "./polling";
+import {Stream} from "./handler";
+import {PollingHandler} from "./polling";
+import {Command} from "../commands";
 
 interface PicartoLanguage {
     language_id: number,
@@ -25,9 +26,9 @@ export interface PicartoStream {
     new_account: boolean
 }
 
-export class PicartoPlugin extends PollingPlugin {
-    constructor() {
-        super("Picarto.tv", "picarto_tv")
+export default class PicartoHandler extends PollingHandler {
+    constructor(config: { [key: string]: any }) {
+        super(config,"Picarto.tv", "picarto_tv")
     }
 
     resolveStreamUrl(username: string): string {
@@ -67,7 +68,7 @@ export class PicartoPlugin extends PollingPlugin {
 
     async poll(): Promise<any> {
         const newContents = (await this.fetch()).data.channels.map(stream => this.toStream(stream))
-        this.handlers.updated(newContents);
+        this.events.updated(newContents);
         this.compare(this.cache, newContents);
         this.cache = newContents as any;
     }

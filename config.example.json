@@ -1,4 +1,14 @@
 {
+  "handlers": {
+    "piczel": {
+      "pollInterval": 30000
+    },
+    "twitch": {
+      "clientId": "",
+      "clientSecret": ""
+    },
+    "pomf": {}
+  },
   "discord": {
     "token": "insert bot token here",
     "inviteUrl": "oauth invite url for sharing"
@@ -9,14 +19,5 @@
   },
   "express": {
     "port": 3000
-  },
-  "plugins": {
-    "piczel_tv": {
-      "pollInterval": 30000
-    },
-    "twitch_tv": {
-      "clientId": "",
-      "clientSecret": ""
-    }
   }
 }

@@ -1,9 +1,9 @@
 import {Client, Guild, MessageEmbed, TextChannel} from "discord.js";
 import {GuildData, Storage} from "./model";
-import {Plugin, Stream} from "./plugins/plugin";
+import {Handler, Stream} from "./handlers/handler";
 
-export function buildEmbed(plugin: Plugin, stream: Stream) {
-    const footerFrags = [plugin.name];
+export function buildEmbed(handler: Handler, stream: Stream) {
+    const footerFrags = [handler.name];
 
     // flag may not exist, so check for null first to avoid labeling sfw
     if (stream.adult != null) {
@@ -41,7 +41,7 @@ export class Dispatcher {
         const previous = await this.store.messages().collection.findOneAndDelete({
             guildId: guild.id,
             networkId,
-            streamId
+            streamId: {$regex: `^${streamId}$`, $options: 'i'}
         });
 
         if (previous.value) {
@@ -54,12 +54,12 @@ export class Dispatcher {
 
     /**
      * Announce stream to channel
-     * @param plugin
+     * @param handler
      * @param stream
      * @param channel
      */
-    async announceToChannel(plugin: Plugin, stream: Stream, channel: TextChannel) {
-        await this.unannounce(channel.guild, plugin.id, stream.username);
+    async announceToChannel(handler: Handler, stream: Stream, channel: TextChannel) {
+        await this.unannounce(channel.guild, handler.id, stream.username);
 
         this.log("Announcing stream in channel " + channel.id);
         const messages = this.store.messages().collection;
@@ -73,13 +73,13 @@ export class Dispatcher {
             });
         }
 
-        return channel.send(buildEmbed(plugin, stream)).then(message => {
+        return channel.send(buildEmbed(handler, stream)).then(message => {
             this.log("Announcement success: " + channel.id);
             messages.insertOne({
                 channelId: channel.id,
                 messageId: message.id,
                 guildId: channel.guild.id,
-                networkId: plugin.id,
+                networkId: handler.id,
                 streamId: stream.username,
             })
         });
@@ -87,16 +87,17 @@ export class Dispatcher {
 
     /**
      * Announce online stream to all subscribers
-     * @param plugin
+     * @param handler
      * @param stream
      */
-    async announceToAll(plugin: Plugin, stream: Stream) {
+    async announceToAll(handler: Handler, stream: Stream) {
         const doc = {};
-        doc[`networks.${plugin.id}.streams`] = stream.username;
+        doc[`networks.${handler.id}.streams`] = {$regex: `^${stream.username}$`, $options: 'i'};
+        console.log(doc);
 
         this.store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
             return this.announceToChannel(
-                plugin,
+                handler,
                 stream,
                 await this.discord.channels.fetch(guild.channelId) as TextChannel
             );
@@ -107,11 +108,11 @@ export class Dispatcher {
      * announce a deferred notification if this stream was just watched,
      * and it was already online
      * @param guild
-     * @param plugin
+     * @param handler
      * @param username
      */
-    announceDeferred(guild: Guild, plugin: Plugin, username: string) {
-        const stream = plugin.cachedStream(username);
+    announceDeferred(guild: Guild, handler: Handler, username: string) {
+        const stream = handler.cachedStream(username);
 
         if (!stream) {
             // nothing to do
@@ -121,7 +122,7 @@ export class Dispatcher {
         this.store.guilds().get(guild).then(
             async (data) => {
                 if (data.channelId) {
-                    this.announceToChannel(plugin, stream, await this.discord.channels.fetch(data.channelId) as TextChannel)
+                    this.announceToChannel(handler, stream, await this.discord.channels.fetch(data.channelId) as TextChannel)
                 }
             }
         )

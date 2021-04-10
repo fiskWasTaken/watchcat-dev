@@ -1,5 +1,5 @@
-import {Stream} from "./plugin";
-import {PollingPlugin} from "./polling";
+import {Stream} from "./handler";
+import {PollingHandler} from "./polling";
 
 interface PiczelResource {
     url: string;
@@ -59,9 +59,9 @@ interface PiczelStreamsRequestParams {
     sfw: boolean;
 }
 
-export class PiczelPlugin extends PollingPlugin {
-    constructor() {
-        super("Piczel.tv", "piczel_tv")
+export default class PiczelHandler extends PollingHandler {
+    constructor(config: { [key: string]: any }) {
+        super(config,"Piczel.tv", "piczel_tv")
     }
 
     resolveStreamUrl(username: string): string {
@@ -99,7 +99,7 @@ export class PiczelPlugin extends PollingPlugin {
 
     async poll() {
         const newContents = (await this.fetch()).data.map(stream => this.toStream(stream))
-        this.handlers.updated(newContents);
+        this.events.updated(newContents);
         this.compare(this.cache, newContents);
         this.cache = newContents as any;
     }

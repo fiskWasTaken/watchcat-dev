@@ -18,7 +18,7 @@ export interface ManagedMessage {
     messageId: string;
     channelId: string;
     guildId: string;
-    networkId: string; // unique plugin/network ID
+    networkId: string; // unique handler/network ID
     streamId: string; // streamer ID
 }
 
