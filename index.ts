@@ -7,6 +7,7 @@ import {Command} from "./commands";
 import {Dispatcher} from "./dispatcher";
 import * as fs from "fs";
 import * as path from "path";
+import color from "colorts";
 
 const express = require('express')
 const config = require("./config.json");
@@ -89,11 +90,11 @@ class HandlerManager {
 }
 
 discord.on("ready", () => {
-    console.log(`Logged in as ${discord.user.tag}.`);
+    log(`Logged in as ${discord.user.tag}.`);
 });
 
 discord.on("guildCreate", (guild: Guild) => {
-    console.log(`Added to guild ${guild.name} (${guild.id}).`);
+    log(`Added to guild ${guild.name} (${guild.id}).`);
     guild.owner.user.createDM().then(async chan => {
         await chan.send("Hey there - I just wanted to help you set up stream notifications for your server." +
             "" +
@@ -102,7 +103,7 @@ discord.on("guildCreate", (guild: Guild) => {
 });
 
 discord.on("guildDelete", async (guild: Guild) => {
-    console.log(`Removed from guild ${guild.name} (${guild.id}) -- removing data.`);
+    log(`Removed from guild ${guild.name} (${guild.id}) -- removing data.`);
     await store.guilds().delete(guild);
     await store.messages().purgeForGuild(discord, guild);
 });
@@ -139,7 +140,7 @@ discord.on("message", async (msg: Message) => {
     }
 
     if (!await hasSendMessagePrivilege(msg.channel as TextChannel)) {
-        console.log("Missing SEND_MESSAGES permission, attempting to nag owner");
+        log("Missing SEND_MESSAGES permission, attempting to nag owner");
 
         msg.guild.owner.createDM().then(dm => {
             dm.send(`Hey! I need the privilege to send messages in <#${msg.channel.id}> so I can operate.`);
@@ -148,7 +149,7 @@ discord.on("message", async (msg: Message) => {
         return;
     }
 
-    console.log("received text message " + msg.content);
+    log("received text message " + msg.content);
 
     const args = msg.content.split(/\s+/g);
     const command = args[1];
@@ -163,7 +164,7 @@ discord.on("message", async (msg: Message) => {
                 .setDescription("You do not have the rights to use this command."))
         }
     } else {
-        console.log(`not a command ${command}, showing help`);
+        log(`not a command ${command}, showing help`);
         commands["help"].callable(msg.guild, []);
     }
 });
@@ -215,7 +216,7 @@ app.get('/', (req, res) => {
 })
 
 app.listen(port, () => {
-    console.log(`HTTP server listening on port ${port}`)
+    log(`HTTP server listening on port ${port}`)
 })
 
 let db: Db;
@@ -228,11 +229,15 @@ function enabled(handlerPath: string): boolean {
     return Object.keys(config.handlers).indexOf(handlerId(handlerPath)) !== -1;
 }
 
+function log(message: string) {
+    console.log(`[${color("Watchcat").green}] ${message}`);
+}
+
 MongoClient.connect(config.mongo.url).then(async mongo => {
     db = mongo.db(config.mongo.db);
     store = new Storage(db);
 
-    console.log("Running DB migrations...");
+    log("Running DB migrations...");
     await runMigrations(store);
 
     const files = fs.readdirSync('./handlers').filter(f => f.endsWith('.ts')).filter(enabled);
@@ -240,15 +245,15 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
     const dispatcher = new Dispatcher(discord, store);
     const handlers = new HandlerManager(dispatcher);
 
+    await discord.login(config.discord.token);
+
+    log("Initialising handlers");
     await Promise.all(files.map(async f => {
         const handler = new (require(`./handlers/${f}`).default)(config.handlers[handlerId(f)]);
         await handlers.load(handler);
     }));
 
-    await discord.login(config.discord.token);
-
-    console.log("Registering commands")
-
+    log("Registering commands")
     fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(async f => {
         const command = f({discord, store, dispatcher, handlers, commands, config});
         command.privilege = command.privilege || "USER";
@@ -262,7 +267,7 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
                     "options": command.options
                 })
             } catch (e) {
-                console.log(`Couldn't create command for ${command.name}`)
+                log(`Couldn't create command for ${command.name}`)
                 console.log(e);
             }
         }

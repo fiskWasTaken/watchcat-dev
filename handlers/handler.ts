@@ -77,7 +77,7 @@ export abstract class Handler {
      * @param data
      */
     log(data: string): void {
-        console.log(`[${color(this.name).magenta}] ${data}`);
+        console.debug(`[${color(this.name).magenta}] ${data}`);
     }
 
     on(event, func) {

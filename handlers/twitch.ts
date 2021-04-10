@@ -71,8 +71,6 @@ export default class TwitchHandler extends PollingHandler {
             return;
         }
 
-        this.log("Checking users: " + collect.join(", "))
-
         // todo: is currently only going to work with up to 100 users with this model.
         // instead of doing 100 user splits, we should really move to webhooks, but I'm lazy
         const result = await this.api.get(`streams`, {

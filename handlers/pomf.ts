@@ -37,7 +37,6 @@ export default class PomfHandler extends PollingHandler {
     async poll(): Promise<any> {
         // step one: concatenate our target users to make requests for
         const collect = await this.globalFollows();
-        this.log(`${collect.length} user(s) for which to perform update.`)
 
         // step two: test online status of each
         for (const user of collect) {
