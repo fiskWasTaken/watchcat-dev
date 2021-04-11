@@ -21,12 +21,12 @@ export abstract class PollingHandler extends Handler {
     async main() {
         try {
             await this.poll();
+            await this.collection().replaceOne({_id: this.id}, {streams: this.cache}, {upsert: true});
         } catch (e) {
-            console.error("Poll failure:")
+            this.log("Poll failure (check stderr for exception details");
+            console.error(`${this.id} poll failure`)
             console.trace(e)
         }
-
-        await this.collection().replaceOne({_id: this.id}, {streams: this.cache}, {upsert: true});
     }
 
     async ready() {

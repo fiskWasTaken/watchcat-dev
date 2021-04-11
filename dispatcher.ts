@@ -72,7 +72,7 @@ export class Dispatcher {
             channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
                 this.log(`Ping message created in #${channel.name} (#${message.id}). Cleaning up...`);
                 message.delete();
-            });
+            }).catch(console.error);
         }
 
         return channel.send(buildEmbed(handler, stream)).then(message => {
@@ -85,7 +85,7 @@ export class Dispatcher {
                 networkId: handler.id,
                 streamId: stream.username,
             })
-        });
+        }).catch(console.error);
     }
 
     /**
