@@ -62,22 +62,28 @@ export class Dispatcher {
     async announceToChannel(handler: Handler, stream: Stream, channel: TextChannel) {
         await this.unannounce(channel.guild, handler.id, stream.username);
 
-        this.log("Announcing stream in channel " + channel.id);
+        this.log(`Announcing stream in #${channel.name} (${channel.guild.name})`);
         const messages = this.store.messages().collection;
-
         const guild = await this.store.guilds().get(channel.guild);
 
         if (guild.pingRole) {
             // if there's a ping role we just send a message and nuke it right away
+            this.log(`Ping role enabled for #${channel.name}, sending ping message for role ${guild.pingRole}`);
+            
             channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
+                this.log(`Ping message created in #${channel.name} (${message.id}). Deleting shortly`);
+
                 setTimeout(() => {
-                    message.delete();
-                }, 1000);
+                    message.delete().then(result => {
+                        this.log(`Ping message deleted in #${channel.name} (${result.id}).`);
+                    });
+                }, 5000);
             });
         }
 
         return channel.send(buildEmbed(handler, stream)).then(message => {
-            this.log("Announcement success: " + channel.id);
+            this.log(`Announced in #${channel.name} (${message.id}`);
+
             messages.insertOne({
                 channelId: channel.id,
                 messageId: message.id,
@@ -124,7 +130,13 @@ export class Dispatcher {
         this.store.guilds().get(guild).then(
             async (data) => {
                 if (data.channelId) {
-                    this.announceToChannel(handler, stream, await this.discord.channels.fetch(data.channelId) as TextChannel)
+                    this.discord.channels.fetch(data.channelId).then(channel => {
+                        this.announceToChannel(handler, stream, channel as TextChannel);
+                    }).catch(reason => {
+                        this.log(`${guild.name} (${guild.id} tried to announce to channel ${data.channelId}, but there was an error resolving this channel: ${reason}`);
+                    });
+                } else {
+                    this.log(`${guild.name} (${guild.id} tried to announce, but no channel is configured!`);
                 }
             }
         )
