@@ -62,7 +62,6 @@ export class Dispatcher {
     async announceToChannel(handler: Handler, stream: Stream, channel: TextChannel) {
         await this.unannounce(channel.guild, handler.id, stream.username);
 
-        this.log(`Announcing stream in #${channel.name} (${channel.guild.name})`);
         const messages = this.store.messages().collection;
         const guild = await this.store.guilds().get(channel.guild);
 
@@ -71,18 +70,13 @@ export class Dispatcher {
             this.log(`Ping role enabled for #${channel.name}, sending ping message for role ${guild.pingRole}`);
             
             channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
-                this.log(`Ping message created in #${channel.name} (${message.id}). Deleting shortly`);
-
-                setTimeout(() => {
-                    message.delete().then(result => {
-                        this.log(`Ping message deleted in #${channel.name} (${result.id}).`);
-                    });
-                }, 5000);
+                this.log(`Ping message created in #${channel.name} (#${message.id}). Cleaning up...`);
+                message.delete();
             });
         }
 
         return channel.send(buildEmbed(handler, stream)).then(message => {
-            this.log(`Announced in #${channel.name} (${message.id}`);
+            this.log(`Announced in ${channel.guild.name} - #${channel.name} (#${message.id})`);
 
             messages.insertOne({
                 channelId: channel.id,
@@ -109,7 +103,7 @@ export class Dispatcher {
                 stream,
                 await this.discord.channels.fetch(guild.channelId) as TextChannel
             );
-        })
+        });
     }
 
     /**

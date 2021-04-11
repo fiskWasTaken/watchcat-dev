@@ -50,14 +50,6 @@ export abstract class Handler {
         res.send("ok")
     }
 
-    onUserWatched(username: string) {
-        // todo ensure this is called
-    }
-
-    onUserUnwatched(username: string) {
-        // todo ensure this is called
-    }
-
     setBackend(db: Db) {
         this.db = db;
     }

@@ -1,5 +1,6 @@
 import {Collection, Db, DeleteWriteOpResultObject} from "mongodb";
 import {Client, Guild, TextChannel} from "discord.js";
+import color from "colorts";
 
 export interface GuildData {
     _id?: any;
@@ -24,7 +25,9 @@ export interface ManagedMessage {
 
 export class Storage {
     constructor(private db: Db) {
-        db.collection("guilds").createIndex({"guildId": 1}, {unique: true});
+        db.collection("guilds").createIndex({"guildId": 1}, {unique: true}).then(_ => {
+            // indexes assured
+        });
     }
 
     guilds(): Guilds {
@@ -117,11 +120,17 @@ export class ManagedMessages extends Model<ManagedMessage> {
     async purge(discord: Client, msg: ManagedMessage) {
         await this.collection.deleteOne({_id: msg._id});
 
-        discord.channels.fetch(msg.channelId).then(chan => {
-            (chan as TextChannel).messages.delete(msg.messageId);
-        });
+        try {
+            const chan = await discord.channels.fetch(msg.channelId) as TextChannel;
+            await chan.messages.delete(msg.messageId);
+            this.log(`Deleted previous announcement in ${chan.name} (${msg.messageId}).`);
+        } catch (e) {
+            this.log(`Managed message (${msg.messageId}) was already deleted, or the channel was removed.`)
+        }
+    }
 
-        console.log("purged managed message " + msg.messageId);
+    log(message: string) {
+        console.log(`[${color("Management").blue}] ${message}`);
     }
 
     async purgeForStreamer(discord: Client, networkId: string, streamId: string) {

@@ -63,12 +63,12 @@ class HandlerManager {
         });
 
         handler.on("started", async (stream: Stream) => {
-            handler.log(`stream ${stream.id} started: ${stream.username}`);
+            handler.log(`Stream ${stream.id} started: ${stream.username}`);
             await this.dispatcher.announceToAll(handler, stream);
         });
 
         handler.on("stopped", async (stream: Stream) => {
-            handler.log(`stream ${stream.id} stopped: ${stream.username}`);
+            handler.log(`Stream ${stream.id} stopped: ${stream.username}`);
             await store.messages().purgeForStreamer(discord, handler.id, stream.username);
         });
 
@@ -125,7 +125,7 @@ discord.on("interaction", async (interaction: CommandInteraction) => {
         }
     } catch (e) {
         // unknown interaction
-        console.log(e)
+        log(e)
     }
 });
 
@@ -149,7 +149,7 @@ discord.on("message", async (msg: Message) => {
         return;
     }
 
-    log("received text message " + msg.content);
+    log("Received text message " + msg.content);
 
     const args = msg.content.split(/\s+/g);
     const command = args[1];
@@ -164,7 +164,7 @@ discord.on("message", async (msg: Message) => {
                 .setDescription("You do not have the rights to use this command."))
         }
     } else {
-        log(`not a command ${command}, showing help`);
+        log(`Not a command ${command}, showing help`);
         commands["help"].callable(msg.guild, []);
     }
 });
@@ -254,7 +254,8 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
     }));
 
     log("Registering commands")
-    fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`)).forEach(async f => {
+
+    for (const f of fs.readdirSync('./commands').filter(f => f.endsWith('.ts')).map(f => require(`./commands/${f}`))) {
         const command = f({discord, store, dispatcher, handlers, commands, config});
         command.privilege = command.privilege || "USER";
         commands[command.name] = command;
@@ -268,8 +269,8 @@ MongoClient.connect(config.mongo.url).then(async mongo => {
                 })
             } catch (e) {
                 log(`Couldn't create command for ${command.name}`)
-                console.log(e);
+                log(e);
             }
         }
-    });
+    }
 });

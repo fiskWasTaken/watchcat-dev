@@ -10,12 +10,19 @@ function log(message: string) {
  */
 export async function migration0001PiczelToGeneric(store: Storage) {
     const channelRenameResult = await store.guilds().collection.updateMany({}, {$rename: {following: "networks.piczel_tv.streams"}});
-    log(`Migration 'following to networks.piczel_tv.streams': matched: ${channelRenameResult.matchedCount}, modified: ${channelRenameResult.modifiedCount}`);
+
+    if (channelRenameResult.modifiedCount > 0) {
+        log(`Migration 'following to networks.piczel_tv.streams': modified: ${channelRenameResult.modifiedCount}`);
+    }
+
     const messageRenameResult = await store.messages().collection.updateMany({piczelUsername: {$exists: true}}, {
         $rename: {"piczelUsername": "streamId"},
         $set: {'networkId': "piczel_tv"}
     });
-    log(`Migration 'piczelUsername to generic format': matched: ${messageRenameResult.matchedCount}, modified: ${messageRenameResult.modifiedCount}`);
+
+    if (messageRenameResult.modifiedCount > 0) {
+        log(`Migration 'piczelUsername to generic format': modified: ${messageRenameResult.modifiedCount}`);
+    }
 }
 
 /**
