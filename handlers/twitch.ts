@@ -36,7 +36,8 @@ export default class TwitchHandler extends PollingHandler {
 
         this.api = new TwitchJs({
             clientId: this.config?.clientId,
-            onAuthenticationFailure: onAuthenticationFailure
+            onAuthenticationFailure: onAuthenticationFailure,
+            log: {level: "warn"}
         }).api;
     }
 
