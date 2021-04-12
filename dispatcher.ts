@@ -68,7 +68,7 @@ export class Dispatcher {
         if (guild.pingRole) {
             // if there's a ping role we just send a message and nuke it right away
             this.log(`Ping role enabled for #${channel.name}, sending ping message for role ${guild.pingRole}`);
-            
+
             channel.send(`${stream.username} is live! <@&${guild.pingRole}>`).then(message => {
                 this.log(`Ping message created in #${channel.name} (#${message.id}). Cleaning up...`);
                 message.delete();
@@ -97,12 +97,13 @@ export class Dispatcher {
         const doc = {};
         doc[`networks.${handler.id}.streams`] = {$regex: `^${stream.username}$`, $options: 'i'};
 
-        this.store.guilds().collection.find(doc).forEach(async (guild: GuildData) => {
-            return this.announceToChannel(
-                handler,
-                stream,
-                await this.discord.channels.fetch(guild.channelId) as TextChannel
-            );
+        await this.store.guilds().collection.find(doc).forEach((guild: GuildData) => {
+            this.discord.channels.fetch(guild.channelId).then((channel: TextChannel) => {
+                this.announceToChannel(handler, stream, channel)
+            }).catch(e => {
+                this.log(`Channel resolve error: ${e}`);
+                console.error(e);
+            });
         });
     }
 
