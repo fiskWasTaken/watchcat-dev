@@ -76,13 +76,7 @@ export default class TwitchHandler extends PollingHandler {
         // instead of doing 100 user splits, we should really move to webhooks, but I'm lazy
         const result = await this.api.get(`streams`, {
             search: {
-                user_login: collect
-            }
-        });
-
-        console.log({
-            search: {
-                user_login: collect
+                user_login: collect.join(' ')
             }
         });
 
