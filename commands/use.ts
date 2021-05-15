@@ -22,7 +22,11 @@ module.exports = (env: Env) => {
             }
 
             if (guildInfo && guildInfo.channelId) {
-                await env.store.messages().purgeForChannel(env.discord, (await env.discord.channels.fetch(guildInfo.channelId) as TextChannel));
+                try {
+                    await env.store.messages().purgeForChannel(env.discord, (await env.discord.channels.fetch(guildInfo.channelId) as TextChannel));
+                } catch (e) {
+                    // channel probably deleted
+                }
             }
 
             await env.store.guilds().setChannel(guild, channel.id);
