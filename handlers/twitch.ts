@@ -78,7 +78,11 @@ export default class TwitchHandler extends PollingHandler {
             search: "?" + collect.map(name => `user_login=${name}`).join("&") as any
         });
 
-        console.log(result.data);
+        console.log(result);
+
+        console.log({
+            search: "?" + collect.map(name => `user_login=${name}`).join("&") as any
+        });
 
         const newContents = result.data.map(stream => this.toStream(stream));
         this.events.updated(newContents);
