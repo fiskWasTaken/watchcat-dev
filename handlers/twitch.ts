@@ -80,6 +80,14 @@ export default class TwitchHandler extends PollingHandler {
             }
         });
 
+        console.log({
+            search: {
+                user_login: collect
+            }
+        });
+
+        console.log(result.data);
+
         const newContents = result.data.map(stream => this.toStream(stream));
         this.events.updated(newContents);
         this.compare(this.cache, newContents);
