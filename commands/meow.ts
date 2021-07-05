@@ -14,6 +14,7 @@ module.exports = (env: Env) => {
 
             return `${choose(words)} ${choose(emoji)}`;
         },
-        name: "meow"
+        name: "meow",
+        options: [],
     }
 };
